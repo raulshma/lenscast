@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createSignal } from 'solid-js'
+import { For, Show, createEffect, createMemo, createSignal } from 'solid-js'
 import type { NextState } from './NextState'
 import type { NextThemeMode } from '../../hooks/useNextTheme'
 import { uiModeStore } from '../../lib/uiMode'
@@ -37,6 +37,7 @@ import {
   thermalTone,
   thermalLabel,
   vitalToneClass,
+  type ChannelState,
 } from './lib/telemetry'
 import LiveView from './views/LiveView'
 import MediaView from './views/MediaView'
@@ -142,7 +143,8 @@ export default function NextShell(props: Props) {
   const streaming = () => state.status()?.streaming
   const isLive = () => streaming()?.isActive === true
 
-  const channels = () => channelStates(state.status())
+  const channels = createMemo(() => channelStates(state.status()))
+  const channelCodes = createMemo(() => channels().map((c) => c.code))
 
   // TX/FPS read the PREVIEW's own lane via the picker (issue #25): the
   // measured bitrate/fps of the rung the preview is showing — the MJPEG
@@ -344,22 +346,30 @@ export default function NextShell(props: Props) {
             </Show>
 
             {/* Channel LEDs — tap to jump to the streaming rack. */}
-            <For each={channels()}>
-              {(channel) => (
-                <button
-                  type="button"
-                  class="nx-chip"
-                  classList={{
-                    'nx-chip-ok': channelLed(channel) === 'ok',
-                    'nx-chip-warn': channelLed(channel) === 'warn' || channelLed(channel) === 'danger',
-                  }}
-                  onClick={() => router.navigate({ name: 'system', tab: 'streaming' })}
-                  title={channel.error || channel.code}
-                >
-                  <Led tone={channelLed(channel)} />
-                  <span class="nx-num">{channel.code}</span>
-                </button>
-              )}
+            <For each={channelCodes()}>
+              {(code) => {
+                let cached: ChannelState | undefined
+                const channel = () => {
+                  const found = channels().find((entry) => entry.code === code)
+                  if (found) cached = found
+                  return found ?? cached!
+                }
+                return (
+                  <button
+                    type="button"
+                    class="nx-chip"
+                    classList={{
+                      'nx-chip-ok': channelLed(channel()) === 'ok',
+                      'nx-chip-warn': channelLed(channel()) === 'warn' || channelLed(channel()) === 'danger',
+                    }}
+                    onClick={() => router.navigate({ name: 'system', tab: 'streaming' })}
+                    title={channel().error || code}
+                  >
+                    <Led tone={channelLed(channel())} />
+                    <span class="nx-num">{code}</span>
+                  </button>
+                )
+              }}
             </For>
 
             <Show when={txLabel()}>

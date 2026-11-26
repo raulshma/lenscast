@@ -562,8 +562,8 @@ export default function MultiCamPanel() {
   })
 
   return (
-    <SettingItem id="multicam.list">
-      <Panel title={t('multicam.title')}>
+    <Panel title={t('multicam.title')}>
+      <SettingItem id="multicam.list">
       <FieldRow label={tCount('multicam.count', cameras().length)}>
         <div class="nx-deterrence">
           <Button
@@ -633,7 +633,7 @@ export default function MultiCamPanel() {
       <Show when={formError()}>
         <div class="nx-banner nx-banner-danger" role="alert">{formError()}</div>
       </Show>
-      </Panel>
-    </SettingItem>
+      </SettingItem>
+    </Panel>
   )
 }

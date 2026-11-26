@@ -24,6 +24,7 @@ import { cyclePlayerMode, hlsPlaybackKind, hlsSupported, nextPlayerMode, type Pl
 import { createWhepPlayer } from '../lib/whepClient'
 import { canShareFiles, shareSnapshotImage, snapshotFileName } from '../lib/share'
 import { PttFallbackUplink, floatChunkToPcm16 } from '../lib/pttFallback'
+import { previewActionsModeStore } from '../lib/previewActionsMode'
 import { t } from '../lib/i18n'
 import type Hls from 'hls.js'
 
@@ -80,6 +81,11 @@ interface Props {
    * starts from an unzoomed picture. Absent or false: gestures run as ever.
    */
   gesturesLocked?: () => boolean
+  /**
+   * Enables the beta UI's compact icon-first action bar with styled tooltips
+   * and a persisted toggle to switch back to full-text buttons.
+   */
+  compactActions?: boolean
 }
 
 // The talkback mic tap. AudioWorklet (the modern replacement for the
@@ -210,6 +216,11 @@ export default function StreamPreview(props: Props) {
   const statsMounted = () => streamStatsOverlayMounted(statsOverlay.mode(), statsGate())
   const statsVisible = () => streamStatsOverlayVisible(statsOverlay.mode(), statsGate())
   const statsLabel = () => statsStateLabel(statsOverlay.mode())
+
+  const actionsMode = previewActionsModeStore()
+  const isCompactActions = () => !!props.compactActions && actionsMode.mode() === 'compact'
+  const tipAttr = (text: string) => (props.compactActions ? text : undefined)
+  const titleAttr = (text: string) => (props.compactActions ? undefined : text)
 
   const [focusIndicator, setFocusIndicator] = createSignal<{ x: number; y: number; visible: boolean }>({
     x: 0,
@@ -897,44 +908,64 @@ export default function StreamPreview(props: Props) {
       </div>
 
       {/* Action Bar */}
-      <div class="preview-actions">
+      <div
+        class="preview-actions"
+        classList={{
+          'preview-actions-compact': isCompactActions(),
+          'preview-actions-full': !!props.compactActions && !isCompactActions(),
+        }}
+      >
         <div class="preview-actions-left">
           {/* The rung stands still while the picture's gestures are locked
               (the masking-zone editor maps zones onto the MJPEG frame, which
               the other rungs crop): the key that would cycle it is stopped
               upstream, and this button stands down. */}
           <button
-            class="action-btn action-btn-ghost"
+            type="button"
+            class="action-btn action-btn-ghost action-btn-icon"
             onClick={() => setPlayerMode(cyclePlayerMode(playerMode()))}
             disabled={props.gesturesLocked?.() === true}
-            title={`${t('preview.playerTitle', { mode: playerMode().toUpperCase(), next: cyclePlayerMode(playerMode()).toUpperCase() })}`}
+            data-tooltip={tipAttr(t('preview.playerTitle', { mode: playerMode().toUpperCase(), next: cyclePlayerMode(playerMode()).toUpperCase() }))}
+            aria-label={tipAttr(t('preview.playerTitle', { mode: playerMode().toUpperCase(), next: cyclePlayerMode(playerMode()).toUpperCase() }))}
+            title={titleAttr(t('preview.playerTitle', { mode: playerMode().toUpperCase(), next: cyclePlayerMode(playerMode()).toUpperCase() }))}
           >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polygon points="12 2 2 7 12 12 22 7 12 2" />
-              <polyline points="2 17 12 22 22 17" />
-              <polyline points="2 12 12 17 22 12" />
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="2" y="3" width="20" height="14" rx="2" />
+              <line x1="8" y1="21" x2="16" y2="21" />
+              <line x1="12" y1="17" x2="12" y2="21" />
+              <polygon points="10 7.5 15 10 10 12.5 10 7.5" fill="currentColor" stroke="none" />
             </svg>
             <span>{t('preview.playerLabel', { mode: playerMode().toUpperCase() })}</span>
           </button>
           <button
             type="button"
-            class="action-btn action-btn-ghost"
+            class="action-btn action-btn-ghost action-btn-icon"
+            classList={{
+              'action-btn-toggled': statsOverlay.mode() === 'on',
+              'action-btn-muted': statsOverlay.mode() === 'off',
+            }}
             onClick={() => statsOverlay.cycle()}
-            title={t('preview.statsTitle', statsLabel())}
+            data-tooltip={tipAttr(t('preview.statsTitle', statsLabel()))}
+            aria-label={tipAttr(t('preview.statsTitle', statsLabel()))}
+            title={titleAttr(t('preview.statsTitle', statsLabel()))}
           >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="3 17 9 11 13 15 21 7" />
-              <polyline points="15 7 21 7 21 13" />
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <line x1="18" y1="20" x2="18" y2="10" />
+              <line x1="12" y1="20" x2="12" y2="4" />
+              <line x1="6" y1="20" x2="6" y2="14" />
             </svg>
             <span>{t('preview.statsLabel', { state: statsLabel().state })}</span>
           </button>
           <button
             type="button"
-            class="action-btn action-btn-ghost"
+            class="action-btn action-btn-ghost action-btn-icon"
+            classList={{ 'action-btn-toggled': fullscreen.active() }}
             onClick={fullscreen.toggle}
-            title={t('preview.fullscreenTitle')}
+            data-tooltip={tipAttr(t('preview.fullscreenTitle'))}
+            aria-label={tipAttr(t('preview.fullscreenTitle'))}
+            title={titleAttr(t('preview.fullscreenTitle'))}
           >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M8 3H5a2 2 0 0 0-2 2v3" />
               <path d="M21 8V5a2 2 0 0 0-2-2h-3" />
               <path d="M3 16v3a2 2 0 0 0 2 2h3" />
@@ -942,38 +973,54 @@ export default function StreamPreview(props: Props) {
             </svg>
             <span>{t('preview.fullscreen')}</span>
           </button>
+
+          <span class="preview-actions-divider" aria-hidden="true" />
+
           <button
             id="capture-btn"
+            type="button"
             class="action-btn action-btn-primary"
             onClick={props.handleCapture}
             disabled={!isActive()}
-            title={t('preview.captureTitle')}
+            data-tooltip={tipAttr(t('preview.captureTitle'))}
+            aria-label={tipAttr(t('preview.captureTitle'))}
+            title={titleAttr(t('preview.captureTitle'))}
           >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <circle cx="12" cy="12" r="10" />
               <circle cx="12" cy="12" r="4" />
             </svg>
             <span>{t('preview.capture')}</span>
           </button>
 
+          <span class="preview-actions-divider" aria-hidden="true" />
+
           {webActive() ? (
             <button
+              type="button"
               class="action-btn action-btn-warning"
               onClick={props.handleStopWebStream}
               disabled={props.streamActionLoading()}
+              data-tooltip={tipAttr(t('preview.webStreamStopTitle'))}
+              aria-label={tipAttr(t('preview.webStreamStopTitle'))}
+              title={titleAttr(t('preview.webStreamStopTitle'))}
             >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <rect x="6" y="6" width="12" height="12" rx="2" />
               </svg>
               <span>{t('preview.stopWeb')}</span>
             </button>
           ) : (
             <button
+              type="button"
               class="action-btn action-btn-success"
               onClick={props.handleStartWebStream}
               disabled={props.streamActionLoading() || !webStreamingEnabled()}
+              data-tooltip={tipAttr(t('preview.webStreamStartTitle'))}
+              aria-label={tipAttr(t('preview.webStreamStartTitle'))}
+              title={titleAttr(t('preview.webStreamStartTitle'))}
             >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <polygon points="5 3 19 12 5 21 5 3" />
               </svg>
               <span>{t('preview.webStream')}</span>
@@ -982,30 +1029,49 @@ export default function StreamPreview(props: Props) {
 
           {rtspActive() ? (
             <button
+              type="button"
               class="action-btn action-btn-warning"
               onClick={props.handleStopRtspStream}
               disabled={props.streamActionLoading()}
+              data-tooltip={tipAttr(t('preview.rtspStreamStopTitle'))}
+              aria-label={tipAttr(t('preview.rtspStreamStopTitle'))}
+              title={titleAttr(t('preview.rtspStreamStopTitle'))}
             >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <rect x="6" y="6" width="12" height="12" rx="2" />
               </svg>
               <span>{t('preview.stopRtsp')}</span>
             </button>
           ) : (
             <button
+              type="button"
               class="action-btn action-btn-success"
               onClick={props.handleStartRtspStream}
               disabled={props.streamActionLoading() || !rtspEnabled()}
+              data-tooltip={tipAttr(t('preview.rtspStreamStartTitle'))}
+              aria-label={tipAttr(t('preview.rtspStreamStartTitle'))}
+              title={titleAttr(t('preview.rtspStreamStartTitle'))}
             >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <polygon points="5 3 19 12 5 21 5 3" />
               </svg>
               <span>{t('preview.rtspStream')}</span>
             </button>
           )}
 
-          <a id="snapshot-btn" class="action-btn action-btn-ghost" href="/snapshot?highres=1&save=1" target="_blank" rel="noopener noreferrer" title={t('preview.snapTitle')}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <span class="preview-actions-divider" aria-hidden="true" />
+
+          <a
+            id="snapshot-btn"
+            class="action-btn action-btn-ghost action-btn-icon"
+            href="/snapshot?highres=1&save=1"
+            target="_blank"
+            rel="noopener noreferrer"
+            data-tooltip={tipAttr(t('preview.snapTitle'))}
+            aria-label={tipAttr(t('preview.snapTitle'))}
+            title={titleAttr(t('preview.snapTitle'))}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
               <polyline points="7 10 12 15 17 10" />
               <line x1="12" y1="15" x2="12" y2="3" />
@@ -1015,12 +1081,15 @@ export default function StreamPreview(props: Props) {
 
           <button
             id="share-snapshot-btn"
-            class="action-btn action-btn-ghost"
+            type="button"
+            class="action-btn action-btn-ghost action-btn-icon"
             onClick={() => void handleShareSnapshot()}
             disabled={sharingSnapshot()}
-            title={t('preview.shareTitle')}
+            data-tooltip={tipAttr(t('preview.shareTitle'))}
+            aria-label={tipAttr(t('preview.shareTitle'))}
+            title={titleAttr(t('preview.shareTitle'))}
           >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <circle cx="18" cy="5" r="3" />
               <circle cx="6" cy="12" r="3" />
               <circle cx="18" cy="19" r="3" />
@@ -1032,7 +1101,8 @@ export default function StreamPreview(props: Props) {
 
           <button
             id="talk-btn"
-            class="action-btn action-btn-ghost"
+            type="button"
+            class="action-btn action-btn-ghost action-btn-icon"
             classList={{ 'action-btn-talking': talking() }}
             aria-pressed={talking()}
             onPointerDown={(e) => {
@@ -1087,11 +1157,15 @@ export default function StreamPreview(props: Props) {
               void stopPtt()
             }}
             onContextMenu={(e) => e.preventDefault()}
-            title={t('preview.talkTitle')}
+            data-tooltip={tipAttr(t('preview.talkTitle'))}
+            aria-label={tipAttr(t('preview.talkTitle'))}
+            title={titleAttr(t('preview.talkTitle'))}
           >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" />
               <path d="M19 10v2a7 7 0 01-14 0v-2" />
+              <line x1="12" y1="19" x2="12" y2="23" />
+              <line x1="8" y1="23" x2="16" y2="23" />
             </svg>
             <span>{talking() ? t('preview.talking') : t('preview.talk')}</span>
           </button>
@@ -1106,6 +1180,36 @@ export default function StreamPreview(props: Props) {
           </Show>
           <Show when={talkMsg()}>
             <span class="capture-msg">{talkMsg()}</span>
+          </Show>
+          <Show when={props.compactActions}>
+            <span class="preview-actions-divider" aria-hidden="true" />
+            <button
+              type="button"
+              class="action-btn action-btn-ghost action-btn-icon preview-actions-toggle"
+              classList={{ 'action-btn-toggled': !isCompactActions() }}
+              aria-pressed={!isCompactActions()}
+              onClick={() => actionsMode.toggle()}
+              data-tooltip={isCompactActions() ? t('preview.actions.showLabels') : t('preview.actions.compactButtons')}
+              aria-label={isCompactActions() ? t('preview.actions.showLabels') : t('preview.actions.compactButtons')}
+            >
+              <Show
+                when={isCompactActions()}
+                fallback={
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <rect x="4" y="4" width="6" height="6" rx="1.5" />
+                    <rect x="14" y="4" width="6" height="6" rx="1.5" />
+                    <rect x="4" y="14" width="6" height="6" rx="1.5" />
+                    <rect x="14" y="14" width="6" height="6" rx="1.5" />
+                  </svg>
+                }
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="3" y="5" width="18" height="14" rx="3" />
+                  <circle cx="8" cy="12" r="1.5" fill="currentColor" stroke="none" />
+                  <line x1="12" y1="12" x2="17" y2="12" />
+                </svg>
+              </Show>
+            </button>
           </Show>
         </div>
       </div>

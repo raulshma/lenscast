@@ -1,10 +1,11 @@
-import { createSignal, For, Show } from 'solid-js'
+import { createMemo, createSignal, For, onCleanup, Show } from 'solid-js'
 import type { DetectionEvent, DetectionEventType } from '../../../../types'
 import { useEventStream } from '../../../../hooks/useEventStream'
 import { detectionEventsExportUrl } from '../../../../api/client'
-import { collectLabels, filterEvents, type EventFilter } from '../../../../hooks/eventStreamCore'
+import { collectLabels, eventKey, filterEvents, type EventFilter } from '../../../../hooks/eventStreamCore'
 import { openMedia } from '../../../../lib/viewerStore'
 import { formatDateTime, t, tCount } from '../../../../lib/i18n'
+import { observeChildTransitions } from '../../lib/animateList'
 import { Panel, Led, Badge, Segmented, Empty, Button } from '../../ui'
 import { SettingItem, useInspectorSection } from '../../ui/SettingItem'
 
@@ -80,12 +81,12 @@ export default function EventLog(props: { readOnly?: () => boolean } = {}) {
   const exportFilter = (): DetectionEventType | undefined =>
     typeFilter() === 'all' ? undefined : (typeFilter() as DetectionEventType)
 
-  const filteredEvents = () => filterEvents(events(), { type: typeFilter(), label: labelFilter() })
+  const filteredEvents = createMemo(() => filterEvents(events(), { type: typeFilter(), label: labelFilter() }))
+  const filteredEventKeys = createMemo(() => filteredEvents().map((event) => eventKey(event)))
   const knownLabels = () => collectLabels(events())
 
   return (
-    <SettingItem id="events.list">
-      <Panel
+    <Panel
       title={t('events.title')}
       badge={
         <Badge tone="neutral" mono>
@@ -109,6 +110,7 @@ export default function EventLog(props: { readOnly?: () => boolean } = {}) {
         </>
       }
     >
+      <SettingItem id="events.list">
       <Show when={events().length > 0}>
         <div class="nx-log-filters">
           <Segmented
@@ -153,56 +155,70 @@ export default function EventLog(props: { readOnly?: () => boolean } = {}) {
           </Show>
         }
       >
-        <div class="nx-log">
-          <For each={filteredEvents()}>
-            {(event) => (
-              <div class="nx-log-row" classList={{ 'nx-log-row-fault': event.type === 'tamper' }}>
-                <Show when={event.snapshotJpegBase64} fallback={<div class="nx-log-thumb nx-log-thumb-empty" aria-hidden="true" />}>
-                  <img
-                    class="nx-log-thumb"
-                    alt={t('events.snapshotAlt', { type: event.type })}
-                    src={`data:image/jpeg;base64,${event.snapshotJpegBase64}`}
-                  />
-                </Show>
-                <div class="nx-log-body">
-                  <div class="nx-log-line">
-                    <span class={`nx-tag nx-tag-${event.type}`}>{event.type}</span>
-                    <span class="nx-log-time nx-mono">{timeLabel(event.timestampMs)}</span>
-                    <Show when={hasClip(event)}>
-                      <button
-                        type="button"
-                        class="nx-log-clip"
-                        onClick={() => openClip(event)}
-                        title={clipFileName(event) ?? t('events.playClipTitle')}
-                      >
-                        {t('events.viewClip')}
-                      </button>
-                    </Show>
-                  </div>
-                  <div class="nx-log-line nx-log-actions">
-                    <Show when={event.dispatchedActions.length > 0} fallback={<span>{t('events.noActions')}</span>}>
-                      <For each={event.dispatchedActions}>
-                        {(action) => <span class="nx-log-action">{actionLabel(action)}</span>}
-                      </For>
-                    </Show>
-                  </div>
-                  <Show when={event.zones.length > 0 || eventLabels(event).length > 0}>
-                    <div class="nx-log-line nx-log-chips">
-                      <For each={event.zones}>
-                        {(zone) => <span class="nx-chip">{zone}</span>}
-                      </For>
-                      <For each={eventLabels(event)}>
-                        {(label) => <span class="nx-chip nx-log-chip-label">{label}</span>}
-                      </For>
-                    </div>
+        <div
+          class="nx-log"
+          ref={(el: HTMLDivElement) => {
+            const stop = observeChildTransitions(el)
+            onCleanup(stop)
+          }}
+        >
+          <For each={filteredEventKeys()}>
+            {(key) => {
+              let cached: DetectionEvent | undefined
+              const event = () => {
+                const found = filteredEvents().find((entry) => eventKey(entry) === key)
+                if (found) cached = found
+                return found ?? cached!
+              }
+              return (
+                <div class="nx-log-row" classList={{ 'nx-log-row-fault': event().type === 'tamper' }}>
+                  <Show when={event().snapshotJpegBase64} fallback={<div class="nx-log-thumb nx-log-thumb-empty" aria-hidden="true" />}>
+                    <img
+                      class="nx-log-thumb"
+                      alt={t('events.snapshotAlt', { type: event().type })}
+                      src={`data:image/jpeg;base64,${event().snapshotJpegBase64}`}
+                    />
                   </Show>
+                  <div class="nx-log-body">
+                    <div class="nx-log-line">
+                      <span class={`nx-tag nx-tag-${event().type}`}>{event().type}</span>
+                      <span class="nx-log-time nx-mono">{timeLabel(event().timestampMs)}</span>
+                      <Show when={hasClip(event())}>
+                        <button
+                          type="button"
+                          class="nx-log-clip"
+                          onClick={() => openClip(event())}
+                          title={clipFileName(event()) ?? t('events.playClipTitle')}
+                        >
+                          {t('events.viewClip')}
+                        </button>
+                      </Show>
+                    </div>
+                    <div class="nx-log-line nx-log-actions">
+                      <Show when={event().dispatchedActions.length > 0} fallback={<span>{t('events.noActions')}</span>}>
+                        <For each={event().dispatchedActions}>
+                          {(action) => <span class="nx-log-action">{actionLabel(action)}</span>}
+                        </For>
+                      </Show>
+                    </div>
+                    <Show when={event().zones.length > 0 || eventLabels(event()).length > 0}>
+                      <div class="nx-log-line nx-log-chips">
+                        <For each={event().zones}>
+                          {(zone) => <span class="nx-chip">{zone}</span>}
+                        </For>
+                        <For each={eventLabels(event())}>
+                          {(label) => <span class="nx-chip nx-log-chip-label">{label}</span>}
+                        </For>
+                      </div>
+                    </Show>
+                  </div>
                 </div>
-              </div>
-            )}
+              )
+            }}
           </For>
         </div>
       </Show>
-      </Panel>
-    </SettingItem>
+      </SettingItem>
+    </Panel>
   )
 }

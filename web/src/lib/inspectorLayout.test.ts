@@ -9,6 +9,7 @@ import {
   filterSectionsForRole,
   INSPECTOR_LAYOUT_LIMITS,
   inspectorWidthMax,
+  preserveInspectorLayoutIdentity,
   reorderSections,
   removeSection,
   sanitizeInspectorLayout,
@@ -239,5 +240,73 @@ describe('viewer role filtering', () => {
     const layout = addCustomSection(defaultInspectorLayout(), 'Imported rig', ['channels.status'])
     layout.sections[layout.sections.length - 1].sectionId = 'auth'
     expect(filterSectionsForRole(layout.sections, true).map((section) => section.sectionId)).toContain('auth')
+  })
+})
+
+describe('identity preservation across sanitize boundaries', () => {
+  it('returns the previous document untouched when nothing differs', () => {
+    const layout = defaultInspectorLayout()
+    expect(preserveInspectorLayoutIdentity(layout, JSON.parse(JSON.stringify(layout)))).toBe(layout)
+    expect(preserveInspectorLayoutIdentity(layout, layout)).toBe(layout)
+  })
+
+  it('keeps the previous object for every section an edit did not touch', () => {
+    const layout = defaultInspectorLayout()
+    const edited = toggleSectionCollapsed(layout, 'storage')
+    const sanitized = sanitizeInspectorLayout(edited)
+    const preserved = preserveInspectorLayoutIdentity(layout, sanitized)
+    expect(preserved.sections).toHaveLength(layout.sections.length)
+    expect(preserved.sections[0]).toBe(layout.sections[0])
+    expect(preserved.sections[2]).toBe(layout.sections[2])
+    expect(preserved.sections[4]).toBe(layout.sections[4])
+    expect(preserved.sections[1]).not.toBe(layout.sections[1])
+    expect(preserved.sections[1].collapsed).toBe(true)
+    expect(preserved.column).toBe(layout.column)
+    expect(preserved.updatedAtMs).toBe(sanitized.updatedAtMs)
+  })
+
+  it('carries the previous references through a reordering and a fresh arrival', () => {
+    const layout = addBuiltinSection(defaultInspectorLayout(), 'lens')
+    const moved = reorderSections(layout, 0, layout.sections.length - 1)
+    const preserved = preserveInspectorLayoutIdentity(layout, sanitizeInspectorLayout(moved))
+    for (const section of layout.sections) {
+      expect(preserved.sections).toContain(section)
+    }
+    // A reorder is a real change even though every reference survives —
+    // the new sequence must win, not the previous document.
+    expect(preserved).not.toBe(layout)
+    expect(preserved.sections.map((section) => section.id)).toEqual(moved.sections.map((section) => section.id))
+    // The move itself only shifts references; nothing is rebuilt.
+    expect(preserved.sections[0]).toBe(layout.sections[1])
+  })
+
+  it('replaces a section object only when its content truly changes', () => {
+    const layout = defaultInspectorLayout()
+    const hidden = toggleHiddenItem(layout, 'storage', 'storage.summary')
+    const preserved = preserveInspectorLayoutIdentity(layout, sanitizeInspectorLayout(hidden))
+    expect(preserved.sections[1]).not.toBe(layout.sections[1])
+    expect(preserved.sections[1].hiddenItems).toEqual(['storage.summary'])
+  })
+
+  it('preserves presets and the column independently of the sections', () => {
+    let layout = saveCustomPreset(defaultInspectorLayout(), 'Rig')
+    const edited = toggleColumnCollapsed(layout)
+    const preserved = preserveInspectorLayoutIdentity(layout, sanitizeInspectorLayout(edited))
+    expect(preserved.presets[0]).toBe(layout.presets[0])
+    expect(preserved.column).not.toBe(layout.column)
+    expect(preserved.column.collapsed).toBe(true)
+    for (const section of layout.sections) expect(preserved.sections).toContain(section)
+  })
+
+  it('still rebuilds a section whose identity or shape arrives from outside', () => {
+    const layout = defaultInspectorLayout()
+    const foreign = sanitizeInspectorLayout({
+      ...JSON.parse(JSON.stringify(layout)),
+      sections: JSON.parse(JSON.stringify(layout.sections)).map((section: { id: string }) => (
+        section.id === 'clients' ? { ...section, collapsed: true } : section
+      )),
+    })
+    const preserved = preserveInspectorLayoutIdentity(layout, foreign)
+    expect(preserved.sections.find((section) => section.id === 'clients')).not.toBe(layout.sections[2])
   })
 })

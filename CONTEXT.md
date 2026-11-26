@@ -816,7 +816,33 @@ are discarded, PUTs serialize with one trailing save, and DELETE reset waits
 behind any in-flight PUT without overwriting edits made while it runs.
 Saves debounce for 350ms; refresh runs every 30s and on visibility resume
 only when clean. Viewer mutation, import and reset are no-ops in the client
-as well as denied by the server.
+as well as denied by the server. Every write (edit, save echo, refresh,
+hydrate, reset) passes through `preserveInspectorLayoutIdentity`
+(`web/src/lib/inspectorLayout.ts`), which re-unites the freshly sanitized
+document with the previous objects it was derived from — sanitizing rebuilds
+every section, and the inspector's keyed rendering would otherwise remount
+the whole column on a one-section edit.
+
+### Inspector Section Stack
+**`web/src/components/next/ui/AnimatedInspectorStack.tsx`** and
+**`web/src/components/next/lib/animateList.ts`** — the Live inspector column's
+section list, and the keeper of its stability contract: frames are keyed by
+placement id (never by the placement object), so an edit rewriting one section's
+document re-dresses that frame in place via the live placement accessor (cached
+across removal so downstream memos never throw during unmount) instead of
+remounting panels that fetch on mount. Membership and order changes animate:
+kept frames FLIP from their previous `offsetTop` (layout truth, transform-only),
+added frames fade-and-settle, removed frames leave as a fading static clone
+(ghost) pinned in the fieldset while the kept frames and container height
+settle smoothly into the freed space. Same-order updates (in-place collapse,
+hidden items, save-echo `updatedAtMs`) never trigger FLIP, and `ResizeObserver`
+/ `transitionend` keep snapshots synced once CSS accordion folds
+(`grid-template-rows` 1fr↔0fr on the panel body's clip, `layout.css`) finish.
+Inside expanded panel bodies, client/event/audit lists, and the configurator's
+order list, `observeChildTransitions` provides the same WAAPI entrance, FLIP,
+exit-ghost, and height transitions for added/removed items and async data.
+Degrades to the plain keyed list without WAAPI, under `prefers-reduced-motion`,
+or in jsdom.
 
 ### Web Client Core
 **`web/src/hooks/useAppState.ts`** — the one state hook over the Web API,
@@ -1860,6 +1886,17 @@ same measured data. A null/0 value hides its chip in every mode (the
 honest idle convention — nothing fake, nothing frozen); the CL chip stays
 the honest client count (`clientCount + whepClients`, untouched by the
 stats work).
+
+### Preview Action-Bar Label Mode
+**`web/src/lib/previewActionsMode.ts`** — the beta web UI's action-bar
+compactness switch (the uiMode store shape, `localStorage` key
+`lenscast.previewActions`): `'compact'` (default) renders secondary stream
+controls (Preview player, Stats, Full Screen, Snap, Share, Talk) as 32 px icon
+buttons with styled `data-tooltip` popovers while keeping important actions
+(`Capture`, `Web Stream` / `Stop Web`, `RTSP Stream` / `Stop RTSP`) as
+full-text buttons so the command ledge fits on one row; `'full'` expands all
+labels. Enabled via `compactActions` on `StreamPreview` from `StreamPipHost`
+so the classic shell and existing unit tests stay untouched.
 
 ### Stream Watchdog
 **`core/StreamWatchdog.kt`** — monitors a live stream and performs recovery

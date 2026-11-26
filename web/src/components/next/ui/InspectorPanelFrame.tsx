@@ -8,7 +8,10 @@ import { InspectorSectionContext } from './SettingItem'
 import { inspectorSection, inspectorSectionTitle } from '../views/live/inspectorRegistry'
 
 interface Props {
-  section: WebUiSectionPlacementDto
+  /** The live placement for this frame's id. Reads stay reactive so an
+      edit (collapse, hidden items, title) re-dresses the frame in place —
+      the AnimatedInspectorStack never remounts it for one. */
+  section: Accessor<WebUiSectionPlacementDto>
   readOnly: Accessor<boolean>
   onToggleCollapsed?: () => void
   onHide?: () => void
@@ -17,25 +20,29 @@ interface Props {
 }
 
 export default function InspectorPanelFrame(props: Props) {
-  const definition = () => inspectorSection(props.section.sectionId)
-  const title = () => props.section.kind === 'custom'
-    ? props.section.customTitle || t('next.inspector.configurator.pinnedControls')
-    : props.section.customTitle || t(inspectorSectionTitle(props.section.sectionId))
-  const allHidden = () => props.section.kind === 'custom'
-    ? props.section.items.length === 0
+  const definition = () => inspectorSection(props.section().sectionId)
+  const title = () => props.section().kind === 'custom'
+    ? props.section().customTitle || t('next.inspector.configurator.pinnedControls')
+    : props.section().customTitle || t(inspectorSectionTitle(props.section().sectionId))
+  const allHidden = () => props.section().kind === 'custom'
+    ? props.section().items.length === 0
     : (definition()?.itemIds.length ?? 0) > 0
-      && definition()!.itemIds.every((id) => props.section.hiddenItems.includes(id))
-  const hiddenItems = (): readonly string[] => props.section.hiddenItems
+      && definition()!.itemIds.every((id) => props.section().hiddenItems.includes(id))
+  const hiddenItems = (): readonly string[] => props.section().hiddenItems
   const readOnly = (): boolean => props.readOnly()
 
   return (
     <div
       class="nx-inspector-frame"
       classList={{
-        'nx-inspector-frame-collapsed': props.section.collapsed,
+        'nx-inspector-frame-collapsed': props.section().collapsed,
         'nx-inspector-frame-hidden': allHidden(),
       }}
-      data-section-id={props.section.sectionId}
+      data-section-id={props.section().sectionId}
+      /* The AnimatedInspectorStack keys frames by placement id — stable
+         across content edits — while data-section-id stays the panel's
+         section identity (what tests and tooling select on). */
+      data-placement-id={props.section().id}
       aria-label={title()}
     >
       <InspectorSectionContext.Provider
@@ -48,16 +55,16 @@ export default function InspectorPanelFrame(props: Props) {
           headerActions: (
             <div class="nx-inspector-frame-actions">
               <IconButton
-                label={props.section.collapsed
+                label={props.section().collapsed
                   ? t('next.inspector.section.expand', { title: title() })
                   : t('next.inspector.section.collapse', { title: title() })}
                 size="sm"
                 variant="ghost"
-                ariaExpanded={!props.section.collapsed}
+                ariaExpanded={!props.section().collapsed}
                 disabled={props.readOnly() || !props.onToggleCollapsed}
                 onClick={props.onToggleCollapsed}
               >
-                <ShowCollapsedIcon collapsed={props.section.collapsed} />
+                <ShowCollapsedIcon collapsed={props.section().collapsed} />
               </IconButton>
               <Show when={props.onHide}>
                 <IconButton

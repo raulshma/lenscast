@@ -1,5 +1,6 @@
-import { Show } from 'solid-js'
+import { onCleanup, Show } from 'solid-js'
 import type { JSX } from 'solid-js'
+import { observeChildTransitions } from '../lib/animateList'
 import { useInspectorSection } from './SettingItem'
 
 interface Props {
@@ -42,7 +43,25 @@ export default function Panel(props: Props) {
       </Show>
       <Show when={!allHidden()} fallback={inspector?.emptyState}>
         <div class="nx-panel-body" classList={{ 'nx-panel-body-flush': props.flush === true }}>
-          {props.children}
+          {/* Inside an inspector section the body is one collapsible clip —
+              the 0fr/1fr grid row the collapse transition animates. Panels
+              outside the inspector keep their bare bodies. */}
+          {inspector
+            ? (
+              <div
+                class="nx-panel-body-clip"
+                ref={(el: HTMLDivElement) => {
+                  const stop = observeChildTransitions(el, {
+                    animateHeight: true,
+                    isSuspended: () => Boolean(el.closest('.nx-inspector-frame-collapsed')),
+                  })
+                  onCleanup(stop)
+                }}
+              >
+                {props.children}
+              </div>
+            )
+            : props.children}
         </div>
       </Show>
     </section>

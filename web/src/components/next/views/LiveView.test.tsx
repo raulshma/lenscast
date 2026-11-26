@@ -19,7 +19,13 @@ import {
 import { hashRouter, isNextRoute, type RouteName } from '../../../lib/router'
 import type { AllSettings, DeviceStatus, MaskingZone, WebUiLayoutDto } from '../../../types'
 import type { InspectorLayoutController } from '../../../hooks/useInspectorLayout'
-import { defaultInspectorLayout } from '../../../lib/inspectorLayout'
+import {
+  defaultInspectorLayout,
+  preserveInspectorLayoutIdentity,
+  sanitizeInspectorLayout,
+  toggleSectionCollapsed,
+  toggleSectionVisibility,
+} from '../../../lib/inspectorLayout'
 import type { PlayerMode } from '../../../video/playerLadder'
 import { createMaskEditSession, type MaskEditState } from './live/masking/maskEditSession'
 import type { NextState } from '../NextState'
@@ -1286,5 +1292,59 @@ describe('LiveView — hiding a section asks first', () => {
     expect(screen.queryByRole('alertdialog')).toBeNull()
     expect(clientsFrame()).toBeNull()
     expect(controller.layout().sections.find((section) => section.sectionId === 'clients')!.visible).toBe(false)
+  })
+
+  it('hiding a custom section does not throw and keeps sibling panels mounted without reloading', () => {
+    const { state } = fixtureState()
+    const initial = defaultInspectorLayout()
+    initial.sections.push({
+      id: 'custom-one',
+      kind: 'custom',
+      sectionId: 'custom-custom-one',
+      visible: true,
+      collapsed: false,
+      hiddenItems: [],
+      customTitle: 'Quick Controls',
+      items: ['exposure.iso', 'security.siren'],
+    })
+    const [layout, setLayout] = createSignal<WebUiLayoutDto>(initial)
+    const controller: InspectorLayoutController = {
+      layout,
+      ready: () => true,
+      saving: () => false,
+      localOnly: () => false,
+      error: () => '',
+      mutate: (transform) => setLayout((current) => preserveInspectorLayoutIdentity(current, sanitizeInspectorLayout(transform(current)))),
+      replaceLayout: (raw) => setLayout(raw as WebUiLayoutDto),
+      reset: async () => { setLayout(defaultInspectorLayout()) },
+      refresh: async () => {},
+      flush: async () => {},
+    }
+    mountConfigured(state, controller)
+    const channelsEl = screen.getByTestId('panel-channels')
+    const systemEl = screen.getByTestId('panel-system')
+
+    // Collapse storage, simulate server save echo, then hide the custom section.
+    controller.mutate((current) => toggleSectionCollapsed(current, 'storage'))
+    setLayout((current) => preserveInspectorLayoutIdentity(current, sanitizeInspectorLayout({ ...current, updatedAtMs: 42 })))
+    expect(() => controller.mutate((current) => toggleSectionVisibility(current, 'custom-one'))).not.toThrow()
+
+    expect(screen.getByTestId('panel-channels')).toBe(channelsEl)
+    expect(screen.getByTestId('panel-system')).toBe(systemEl)
+    expect(column()!.querySelector('[data-placement-id="custom-one"]')).toBeNull()
+  })
+
+  it('restores focus without scrolling when closing the configurator drawer', () => {
+    const { state } = fixtureState()
+    const { controller } = configuredLayout()
+    mountConfigured(state, controller)
+    const customizeBtn = screen.getByRole('button', { name: en['next.inspector.customize'] })
+    const focusSpy = vi.spyOn(customizeBtn, 'focus')
+    customizeBtn.focus()
+    focusSpy.mockClear()
+
+    fireEvent.click(customizeBtn)
+    fireEvent.click(screen.getByRole('button', { name: en['common.close'] }))
+    expect(focusSpy).toHaveBeenCalledWith({ preventScroll: true })
   })
 })

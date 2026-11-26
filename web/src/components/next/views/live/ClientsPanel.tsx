@@ -1,6 +1,7 @@
 import { createSignal, For, onCleanup, onMount, Show } from 'solid-js'
 import { kickStreamClient, listStreamClients } from '../../../../api/client'
 import { t, tCount } from '../../../../lib/i18n'
+import { observeChildTransitions } from '../../lib/animateList'
 import { Panel, Badge, Empty, Button } from '../../ui'
 import { SettingItem, useInspectorSection } from '../../ui/SettingItem'
 
@@ -57,17 +58,17 @@ export default function ClientsPanel(props: { readOnly?: () => boolean } = {}) {
   })
 
   return (
-    <SettingItem id="clients.list">
-      <Panel
-        title={t('clients.title')}
-        badge={
-          <Show when={clients()}>
-            <Badge tone={clients()!.httpCount > 0 ? 'accent' : 'neutral'} mono>
-              {clients()!.httpCount}
-            </Badge>
-          </Show>
-        }
-      >
+    <Panel
+      title={t('clients.title')}
+      badge={
+        <Show when={clients()}>
+          <Badge tone={clients()!.httpCount > 0 ? 'accent' : 'neutral'} mono>
+            {clients()!.httpCount}
+          </Badge>
+        </Show>
+      }
+    >
+      <SettingItem id="clients.list">
         <Show when={error()}>
           <div class="nx-banner nx-banner-danger" role="alert">{error()}</div>
         </Show>
@@ -77,7 +78,13 @@ export default function ClientsPanel(props: { readOnly?: () => boolean } = {}) {
             <Badge tone="neutral" mono>HTTP {clients()!.httpCount}</Badge>
             <Badge tone="neutral" mono>RTSP {clients()!.rtspCount}</Badge>
           </div>
-          <ul class="nx-clients">
+          <ul
+            class="nx-clients"
+            ref={(el: HTMLUListElement) => {
+              const stop = observeChildTransitions(el, { animateHeight: true })
+              onCleanup(stop)
+            }}
+          >
             <For each={clients()!.httpClients} fallback={
               <li class="nx-clients-empty">
                 {t('clients.noHttp')}.
@@ -116,7 +123,7 @@ export default function ClientsPanel(props: { readOnly?: () => boolean } = {}) {
             </div>
           </Show>
         </Show>
-      </Panel>
-    </SettingItem>
+      </SettingItem>
+    </Panel>
   )
 }

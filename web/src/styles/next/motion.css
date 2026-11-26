@@ -38,3 +38,10 @@
    consumes the same MediaViewer classes, keeps its own behavior. */
 [data-ui='next'] .gallery-viewer { animation: nx-viewer-in 220ms var(--ease-out); transform-origin: center; }
 @keyframes nx-viewer-in { from { opacity: 0; transform: scale(0.985) } }
+
+/* The inspector's empty states (every item hidden in a section; the
+   whole layout emptied) fade rather than swap — they mount via Show's
+   fallback, so a keyframe fires once per arrival and never re-triggers
+   on an existing node. */
+[data-ui='next'] .nx-inspector-empty { animation: nx-empty-in 160ms var(--ease-out); }
+@keyframes nx-empty-in { from { opacity: 0 } }

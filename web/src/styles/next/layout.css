@@ -1,7 +1,9 @@
 /* Hallmark · shape: app screen · genre: modern-minimal · theme: Console (deal 1/3, seed operator-console-phone-as-camera-rig-9437·d469983a·2026-11-25·r0) · redesign: full
  * nav: rail-first sidebar kept, rebuilt · signature: the live stage · states: loading, empty, error, full · console: graphite
  * faces: Golos kept for cyrillic locales (theme face latin-only), Atkinson Hyperlegible Mono measures
- * axes: dark/grotesk-sans/chromatic-amber · posture: restrained · contrast: pass · v2.0.0 */
+ * axes: dark/grotesk-sans/chromatic-amber · posture: restrained · contrast: pass · v2.0.0
+ * redesign: polish (inspector: one cut surface, paper head band, hover-revealed hide, one-row 41px headers) · 2026-11-26
+ * finish-review: subagent · 4 findings · 4 resolved · Floor 0 FAIL */
 /* ══════════════════════════════════════════════════════════════════
    NEXT UI — SHELL & LAYOUT ("Console" operator deck)
    A slim rail-first sidebar (brand mark, four view items, REC tally,
@@ -708,8 +710,12 @@
   overflow-x: hidden;
   overflow-y: auto;
   scrollbar-gutter: stable;
+  overflow-anchor: none;
 }
 
+/* The head is a toolbar band on the ground — paper, one hairline — not
+   a plate: the panels below are the content surface, and chrome must
+   not wear the same face as content. */
 [data-ui='next'] .nx-inspector-head {
   display: flex;
   align-items: center;
@@ -719,7 +725,7 @@
   z-index: 3;
   margin: calc(-1 * var(--space-sm)) calc(-1 * var(--space-sm)) 0;
   padding: var(--space-sm);
-  background: var(--color-paper-2);
+  background: var(--color-paper);
   border-bottom: 1px solid var(--color-rule);
 }
 
@@ -733,43 +739,176 @@
   text-overflow: ellipsis;
 }
 
+/* In the tablet drawer the column's ground is the drawer's own paper-2,
+   so the head band wears that, not the shell ground. */
+[data-ui='next'] .nx-drawer .nx-inspector-head {
+  background: var(--color-paper-2);
+}
+
+/* The panels are ONE surface: the column's sections sit on 1px seams
+   over a rule ground — the .nx-cut recipe — never a stack of floating
+   cards. Each frame's .nx-panel sheds its own edge; the fieldset's
+   radius carries the block. The fieldset never flex-shrinks: with a
+   non-visible overflow it would lose its content minimum, compress to
+   the column's height, and clip its panels instead of letting the
+   inner scroller scroll. */
 [data-ui='next'] .nx-inspector-panels {
   display: flex;
   flex-direction: column;
-  gap: var(--space-sm);
+  gap: var(--rule-hair);
+  background: var(--color-rule);
+  border-radius: var(--radius-card);
+  overflow: hidden;
   border: 0;
   margin: 0;
   padding: 0;
   min-width: 0;
+  flex-shrink: 0;
+  /* The containing block the section-stack's exit ghosts animate in —
+     anchored to the list itself, so scrolling cancels out of the math. */
+  position: relative;
 }
 
+/* A viewer's panels keep their faces — the fieldset is disabled for
+   them, but the dimming lives on each control's own disabled state,
+   never on the column itself. */
 [data-ui='next'] .nx-inspector-panels:disabled {
-  opacity: 1;
+  background: var(--color-rule);
+  color: inherit;
 }
 
 [data-ui='next'] .nx-inspector-frame {
   min-width: 0;
 }
 
+/* A section inside the cut: faceplate surface, no own edge. Scoped to
+   .nx-inspector-inner, which both the desktop column and the tablet
+   drawer render. */
+[data-ui='next'] .nx-inspector-inner .nx-panel {
+  background: var(--color-paper-2);
+  border: 0;
+  border-radius: 0;
+}
+
+/* ── Collapse: an accordion, not a snap ─────────────────────────────
+   The body is one grid row that folds between 1fr and 0fr — height
+   motion is the accordion's sanctioned exception, and folding the row
+   (instead of display:none) lets the column breathe through the change
+   instead of teleporting. The clip carries overflow and min-height so
+   the row — not the content — is what shrinks; visibility swaps on a
+   delay so collapsed bodies keep tabbable content unreachable only
+   after the fold, and expose it again the instant the fold opens. */
+[data-ui='next'] .nx-inspector-inner .nx-panel-body {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  transition:
+    grid-template-rows var(--dur-short) var(--ease-inout),
+    padding var(--dur-short) var(--ease-inout);
+}
+
+[data-ui='next'] .nx-inspector-inner .nx-panel-body > .nx-panel-body-clip {
+  position: relative;
+  min-height: 0;
+  overflow: hidden;
+  /* The clip inherits the body's stacked children — keep the body's
+     column rhythm across the wrapper. */
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
 [data-ui='next'] .nx-inspector-frame-collapsed > .nx-panel > .nx-panel-body {
-  display: none;
+  grid-template-rows: minmax(0, 0fr);
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+[data-ui='next'] .nx-inspector-frame-collapsed > .nx-panel > .nx-panel-body > .nx-panel-body-clip {
+  visibility: hidden;
+  /* Un-folding restores visibility the instant this rule stops matching;
+     folding delays it until the fold has finished. */
+  transition: visibility 0s linear var(--dur-short);
+}
+
+/* Reduced motion: the fold lands instantly (base.css collapses the
+   durations globally, but not this delay). */
+@media (prefers-reduced-motion: reduce) {
+  [data-ui='next'] .nx-inspector-frame-collapsed > .nx-panel > .nx-panel-body > .nx-panel-body-clip {
+    transition: none;
+  }
 }
 
 [data-ui='next'] .nx-inspector-frame-actions {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: var(--space-3xs);
 }
 
-[data-ui='next'] .nx-inspector-frame-actions .nx-btn-icon {
-  min-width: 44px;
-  min-height: 44px;
+/* The header's icon keys stay 32px squares — the console look — and
+   reach the 44px hit target by expanding ::before, not by inflating
+   the button (which stood every inspector header 53px tall). */
+[data-ui='next'] .nx-inspector-frame-actions .nx-btn-icon::before {
+  inset: -6px;
+}
+
+/* Hide is rare, destructive-adjacent chrome: it waits behind the
+   header's hover (or any focus inside the panel) and stays put where
+   hover doesn't exist. Collapse, the everyday verb, is always there. */
+[data-ui='next'] .nx-inspector-frame-actions .nx-btn-icon:nth-child(2) {
+  opacity: 0;
+  transition: opacity var(--dur-micro) var(--ease-out);
+}
+
+[data-ui='next'] .nx-panel-header:hover .nx-inspector-frame-actions .nx-btn-icon:nth-child(2),
+[data-ui='next'] .nx-panel-header:focus-within .nx-inspector-frame-actions .nx-btn-icon:nth-child(2),
+[data-ui='next'] .nx-inspector-frame-actions .nx-btn-icon:nth-child(2):focus-visible {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  [data-ui='next'] .nx-inspector-frame-actions .nx-btn-icon:nth-child(2) {
+    opacity: 1;
+  }
+}
+
+/* Reduced motion: the reveal lands instantly (base.css collapses the
+   rest globally). */
+@media (prefers-reduced-motion: reduce) {
+  [data-ui='next'] .nx-inspector-frame-actions .nx-btn-icon:nth-child(2) {
+    transition: none;
+  }
+}
+
+/* The inspector's panels run one step denser than the system cards —
+   a 36px header row and a tighter body, so the column reads as one
+   instrument, not a page of cards. The header stays one row whatever
+   the title's length: the title ellipsizes, the actions pin right. */
+[data-ui='next'] .nx-inspector-inner .nx-panel-header {
+  min-height: 36px;
+  padding: var(--space-2xs) var(--space-sm);
+  border-radius: 0;
+  flex-wrap: nowrap;
+}
+
+[data-ui='next'] .nx-inspector-inner .nx-panel-actions {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* Ellipsis needs one line to ellipsize. */
+[data-ui='next'] .nx-inspector-inner .nx-panel-title {
+  white-space: nowrap;
+}
+
+[data-ui='next'] .nx-inspector-inner .nx-panel-body {
+  padding: var(--space-sm);
 }
 
 /* Between the stacked-below-380px column and the widest preset, a field
    row that cannot fit wraps its control under the label instead of
    widening the column. */
-[data-ui='next'] .nx-inspector .nx-field-row {
+[data-ui='next'] .nx-inspector .nx-field-row,
+[data-ui='next'] .nx-drawer .nx-inspector-inner .nx-field-row {
   flex-wrap: wrap;
 }
 
@@ -800,6 +939,7 @@
 
 [data-ui='next'] .nx-inspector-empty {
   padding: var(--space-md);
+  background: var(--color-paper-2);
   color: var(--color-muted);
   font-size: var(--text-sm);
   text-align: center;

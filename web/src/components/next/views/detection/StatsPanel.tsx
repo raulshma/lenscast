@@ -50,8 +50,7 @@ export default function StatsPanel() {
     }))
 
   return (
-    <SettingItem id="detection.stats">
-      <Panel
+    <Panel
       title={t('stats.title')}
       actions={
         <Show when={stats()}>
@@ -64,6 +63,7 @@ export default function StatsPanel() {
         </Show>
       }
     >
+      <SettingItem id="detection.stats">
       <Show
         when={stats()}
         fallback={
@@ -143,7 +143,7 @@ export default function StatsPanel() {
           </div>
         </Show>
       </Show>
-      </Panel>
-    </SettingItem>
+      </SettingItem>
+    </Panel>
   )
 }

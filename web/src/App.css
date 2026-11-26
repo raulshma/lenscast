@@ -974,6 +974,10 @@ html, body {
   align-items: center;
 }
 
+.preview-actions-divider {
+  display: none;
+}
+
 .action-btn {
   display: inline-flex;
   align-items: center;

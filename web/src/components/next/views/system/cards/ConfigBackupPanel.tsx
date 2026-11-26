@@ -69,8 +69,8 @@ export default function ConfigBackupPanel() {
   }
 
   return (
-    <SettingItem id="configBackup.actions">
-      <Panel title={t('config.title')} class="nx-panel-danger">
+    <Panel title={t('config.title')} class="nx-panel-danger">
+      <SettingItem id="configBackup.actions">
       <div class="nx-deterrence">
         <Button size="sm" variant="ghost" disabled={busy()} onClick={download}>
           {t('config.export')}
@@ -105,7 +105,7 @@ export default function ConfigBackupPanel() {
           {error()}
         </span>
       </Show>
+      </SettingItem>
     </Panel>
-    </SettingItem>
   )
 }

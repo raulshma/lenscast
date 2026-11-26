@@ -76,7 +76,7 @@ export default function ConfirmDialog(props: Props) {
     onCleanup(() => {
       window.removeEventListener('keydown', onKey)
       document.body.style.overflow = previousOverflow
-      if (previousFocus?.isConnected) previousFocus.focus()
+      if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true })
     })
   })
 

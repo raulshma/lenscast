@@ -1,4 +1,4 @@
-import { createSignal, For, Show } from 'solid-js'
+import { createMemo, createSignal, For, onCleanup, Show } from 'solid-js'
 import { createVisiblePoll } from '../../../../../hooks/visiblePoll'
 import {
   getAuthConfig,
@@ -12,6 +12,7 @@ import {
 } from '../../../../../api/client'
 import type { AuthSessionInfo } from '../../../../../api/client'
 import { formatTime, t } from '../../../../../lib/i18n'
+import { observeChildTransitions } from '../../../lib/animateList'
 import { Panel, FieldRow, ToggleField, TextInput, Button, Empty } from '../../../ui'
 import { SettingItem, useInspectorSection } from '../../../ui/SettingItem'
 
@@ -244,9 +245,11 @@ export default function AuthPanel() {
 
   createVisiblePoll(refresh, 10_000)
 
+  const sessionPrefixes = createMemo(() => sessions().map((s) => s.tokenPrefix))
+
   return (
-    <SettingItem id="auth.config">
-      <Panel title={t('auth.title')} class="nx-panel-danger">
+    <Panel title={t('auth.title')} class="nx-panel-danger">
+      <SettingItem id="auth.config">
       <ToggleField
         disabled={readOnly()}
         label={t('auth.require')}
@@ -394,32 +397,46 @@ export default function AuthPanel() {
 
       <FieldRow label={t('auth.sessions', { count: sessions().length })} />
       <Show when={sessions().length === 0} fallback={
-        <ul class="nx-clients">
-          <For each={sessions()}>
-            {(session) => (
-              <li class="nx-clients-row">
-                <span class="nx-clients-id nx-mono" title={session.tokenPrefix}>
-                  {t('auth.sessionPrefix', { prefix: session.tokenPrefix })}
-                  {session.role === 'viewer' ? ` — ${t('auth.viewerRole')}` : ''}
-                  {` — ${t('auth.expires', { time: formatTime(session.expiresAtMs, { hour: '2-digit', minute: '2-digit', second: '2-digit' }) })}`}
-                </span>
-                <Button
-                  size="sm"
-                  variant="danger-soft"
-                  disabled={readOnly()}
-                  onClick={() => void revoke(session.tokenPrefix)}
-                  ariaLabel={t('auth.revoke')}
-                >
-                  {t('auth.revoke')}
-                </Button>
-              </li>
-            )}
+        <ul
+          class="nx-clients"
+          ref={(el: HTMLUListElement) => {
+            const stop = observeChildTransitions(el, { animateHeight: true })
+            onCleanup(stop)
+          }}
+        >
+          <For each={sessionPrefixes()}>
+            {(prefix) => {
+              let cached: AuthSessionInfo | undefined
+              const session = () => {
+                const found = sessions().find((entry) => entry.tokenPrefix === prefix)
+                if (found) cached = found
+                return found ?? cached!
+              }
+              return (
+                <li class="nx-clients-row">
+                  <span class="nx-clients-id nx-mono" title={prefix}>
+                    {t('auth.sessionPrefix', { prefix })}
+                    {session().role === 'viewer' ? ` — ${t('auth.viewerRole')}` : ''}
+                    {` — ${t('auth.expires', { time: formatTime(session().expiresAtMs, { hour: '2-digit', minute: '2-digit', second: '2-digit' }) })}`}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="danger-soft"
+                    disabled={readOnly()}
+                    onClick={() => void revoke(prefix)}
+                    ariaLabel={t('auth.revoke')}
+                  >
+                    {t('auth.revoke')}
+                  </Button>
+                </li>
+              )
+            }}
           </For>
         </ul>
       }>
         <Empty title={t('auth.noSessions')} />
       </Show>
-      </Panel>
-    </SettingItem>
+      </SettingItem>
+    </Panel>
   )
 }

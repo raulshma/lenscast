@@ -437,3 +437,80 @@ export function inspectorWidthMax(viewportWidth: number): number {
 export function inspectorLayoutsEqual(a: WebUiLayoutDto, b: WebUiLayoutDto): boolean {
   return JSON.stringify(a) === JSON.stringify(b)
 }
+
+function stringListEquals(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((entry, index) => entry === b[index])
+}
+
+function sectionsEqual(a: WebUiSectionPlacementDto, b: WebUiSectionPlacementDto): boolean {
+  return a.id === b.id
+    && a.kind === b.kind
+    && a.sectionId === b.sectionId
+    && a.visible === b.visible
+    && a.collapsed === b.collapsed
+    && a.customTitle === b.customTitle
+    && stringListEquals(a.hiddenItems, b.hiddenItems)
+    && stringListEquals(a.items, b.items)
+}
+
+function columnsEqual(a: WebUiColumnDto, b: WebUiColumnDto): boolean {
+  return a.widthPx === b.widthPx && a.widthPreset === b.widthPreset && a.collapsed === b.collapsed
+}
+
+function presetsEqual(a: WebUiLayoutPresetDto, b: WebUiLayoutPresetDto): boolean {
+  return a.id === b.id
+    && a.name === b.name
+    && columnsEqual(a.column, b.column)
+    && a.sections.length === b.sections.length
+    && a.sections.every((section, index) => sectionsEqual(section, b.sections[index]))
+}
+
+/**
+ * Re-unite a freshly sanitized document with the objects it was derived from.
+ * Sanitizing rebuilds every section, preset and column as a new object, and
+ * Solid's `<For>` reconciles by reference — handing it all-new objects on a
+ * one-section edit would unmount and remount every panel in the column (each
+ * panel re-fetches on mount, and the momentarily shrunken content yanks the
+ * scroller). So every controller write passes through here: whatever is
+ * content-equal to the previous document keeps the previous reference, and
+ * only what truly changed gets a new one.
+ */
+export function preserveInspectorLayoutIdentity(
+  previous: WebUiLayoutDto,
+  next: WebUiLayoutDto,
+): WebUiLayoutDto {
+  const column = columnsEqual(previous.column, next.column) ? previous.column : next.column
+  const previousSections = new Map(previous.sections.map((section) => [section.id, section]))
+  let sectionsChanged = false
+  const sections = next.sections.map((section) => {
+    const prior = previousSections.get(section.id)
+    if (prior && sectionsEqual(prior, section)) return prior
+    sectionsChanged = true
+    return section
+  })
+  const previousPresets = new Map(previous.presets.map((preset) => [preset.id, preset]))
+  let presetsChanged = false
+  const presets = next.presets.map((preset) => {
+    const prior = previousPresets.get(preset.id)
+    if (prior && presetsEqual(prior, preset)) return prior
+    presetsChanged = true
+    return preset
+  })
+  // Content-equal sections in a different order are still a change — a
+  // reorder must keep the new sequence even though every reference is
+  // preserved — so "untouched" compares the id sequences too.
+  const sameSectionOrder = previous.sections.length === next.sections.length
+    && previous.sections.every((section, index) => section.id === next.sections[index].id)
+  const samePresetOrder = previous.presets.length === next.presets.length
+    && previous.presets.every((preset, index) => preset.id === next.presets[index].id)
+  const untouched = column === previous.column
+    && !sectionsChanged
+    && !presetsChanged
+    && sameSectionOrder
+    && samePresetOrder
+    && previous.activePresetId === next.activePresetId
+    && previous.schemaVersion === next.schemaVersion
+    && previous.updatedAtMs === next.updatedAtMs
+  if (untouched) return previous
+  return { ...next, column, sections, presets }
+}

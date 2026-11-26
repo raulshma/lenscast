@@ -39,8 +39,8 @@ export default function BackupPanel(props: Props) {
   const [telegramTokenDraft, setTelegramTokenDraft] = createSignal('')
 
   return (
-    <SettingItem id="backup.config">
-      <Panel title={t('backup.title')}>
+    <Panel title={t('backup.title')}>
+      <SettingItem id="backup.config">
       <ToggleField
         disabled={readOnly()}
         label={t('backup.autoUpload')}
@@ -143,7 +143,7 @@ export default function BackupPanel(props: Props) {
           onChange={() => save({ backupWifiOnly: !(stream()?.backupWifiOnly ?? API_DEFAULTS.backupWifiOnly) })}
         />
       </Show>
-      </Panel>
-    </SettingItem>
+      </SettingItem>
+    </Panel>
   )
 }

@@ -157,8 +157,8 @@ export default function RecordingTimelinePanel() {
   }
 
   return (
-    <SettingItem id="timeline.recordings">
-      <Panel title={t('timeline.title')}>
+    <Panel title={t('timeline.title')}>
+      <SettingItem id="timeline.recordings">
         <div class="field-group">
         <div class="field-row">
           <div class="timeline-day-picker" role="group" aria-label={t('timeline.dayAria')}>
@@ -275,7 +275,7 @@ export default function RecordingTimelinePanel() {
           </Show>
         </Show>
       </Show>
-      </Panel>
-    </SettingItem>
+      </SettingItem>
+    </Panel>
   )
 }

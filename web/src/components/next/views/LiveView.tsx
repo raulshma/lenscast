@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createSignal, onCleanup, untrack, type JSX } from 'solid-js'
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, untrack, type JSX } from 'solid-js'
 import type { NextState } from '../NextState'
 import type { InspectorLayoutController } from '../../../hooks/useInspectorLayout'
 import {
@@ -26,6 +26,7 @@ import {
 } from '../../../lib/maskEditStore'
 import { IconChevronLeft, IconChevronRight, IconSliders } from '../../icons'
 import { Button, ConfirmDialog, Drawer, IconButton, Skeleton, pushToast } from '../ui'
+import AnimatedInspectorStack from '../ui/AnimatedInspectorStack'
 import InspectorConfigurator from '../InspectorConfigurator'
 import InspectorPanelFrame from '../ui/InspectorPanelFrame'
 import InspectorSectionContent from './live/InspectorSectionContent'
@@ -308,10 +309,10 @@ export default function LiveView(props: {
     onCleanup(() => window.removeEventListener('keydown', onKeyDown, true))
   })
 
-  const visibleSections = () => filterSectionsForRole(
+  const visibleSections = createMemo(() => filterSectionsForRole(
     inspectorLayout().layout().sections.filter((section) => section.visible),
     state.isViewer(),
-  )
+  ))
   const columnCollapsed = () => inspectorLayout().layout().column.collapsed && !editing()
   const inspectorWidth = () => Math.min(dragWidth() ?? inspectorLayout().layout().column.widthPx, widthMax())
   const widthMax = () => inspectorWidthMax(window.innerWidth)
@@ -370,8 +371,26 @@ export default function LiveView(props: {
     inspectorLayout().mutate((layout) => setColumnWidth(layout, next!))
   }
 
-  const inspector = () => (
-    <div class="nx-inspector-inner">
+  const inspector = () => {
+    // Per-instance: the column mounts once into the desktop aside and once
+    // into the tablet drawer, and each carries its own stack measurements.
+    let innerEl: HTMLDivElement | undefined
+    let panelsEl: HTMLFieldSetElement | undefined
+    let savedScrollTop = 0
+    createEffect((wasCollapsed: boolean | undefined) => {
+      const collapsed = columnCollapsed()
+      if (wasCollapsed === false && collapsed && innerEl) {
+        savedScrollTop = innerEl.scrollTop
+      } else if (wasCollapsed === true && !collapsed && innerEl) {
+        const restore = savedScrollTop
+        queueMicrotask(() => {
+          if (innerEl && !columnCollapsed()) innerEl.scrollTop = restore
+        })
+      }
+      return collapsed
+    })
+    return (
+    <div class="nx-inspector-inner" ref={(el: HTMLDivElement) => { innerEl = el }}>
       <header class="nx-inspector-head">
         <select
           class="nx-input nx-select nx-inspector-preset"
@@ -427,22 +446,26 @@ export default function LiveView(props: {
           </Button>
         </Show>
       </header>
-      <fieldset class="nx-inspector-panels" disabled={state.isViewer()}>
+      <fieldset
+        class="nx-inspector-panels"
+        disabled={state.isViewer()}
+        ref={(el: HTMLFieldSetElement) => { panelsEl = el }}
+      >
         <Show
           when={visibleSections().length > 0}
           fallback={<div class="nx-inspector-empty">{t('next.inspector.emptyLayout')}</div>}
         >
-          <For each={visibleSections()}>
+          <AnimatedInspectorStack each={visibleSections} root={() => panelsEl}>
             {(section) => (
               <InspectorPanelFrame
                 section={section}
                 readOnly={state.isViewer}
                 onToggleCollapsed={state.isViewer()
                   ? undefined
-                  : () => inspectorLayout().mutate((current) => toggleSectionCollapsed(current, section.id))}
+                  : () => inspectorLayout().mutate((current) => toggleSectionCollapsed(current, section().id))}
                 onHide={state.isViewer()
                   ? undefined
-                  : () => requestHide(section)}
+                  : () => requestHide(section())}
                 emptyState={
                   <div class="nx-inspector-empty">
                     <span>{t('next.inspector.allHidden')}</span>
@@ -456,18 +479,19 @@ export default function LiveView(props: {
               >
                 <InspectorSectionContent
                   state={state}
-                  kind={section.kind}
-                  sectionId={section.sectionId}
-                  items={section.items}
+                  kind={section().kind}
+                  sectionId={section().sectionId}
+                  items={section().items}
                   readOnly={state.isViewer()}
                 />
               </InspectorPanelFrame>
             )}
-          </For>
+          </AnimatedInspectorStack>
         </Show>
       </fieldset>
     </div>
-  )
+    )
+  }
 
   return (
     // tabindex -1: the picture's focus hand-off (MaskEditLayer) parks the

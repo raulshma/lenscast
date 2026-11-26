@@ -78,8 +78,8 @@ export default function SharePanel() {
   })
 
   return (
-    <SettingItem id="share.links">
-      <Panel title={t('share.title')}>
+    <Panel title={t('share.title')}>
+      <SettingItem id="share.links">
         <div class="share-card-body">
         <div class="share-qr-wrap" title={t('share.qrTitle')}>
           <Show when={!qrError()} fallback={
@@ -103,7 +103,7 @@ export default function SharePanel() {
           </p>
         </div>
       </div>
-      </Panel>
-    </SettingItem>
+      </SettingItem>
+    </Panel>
   )
 }

@@ -119,10 +119,7 @@ function channelLedTone(channel: ChannelState): LedTone {
  */
 export default function CustomSectionPanel(props: CustomSectionPanelProps) {
   const state = props.state
-  const entries = createMemo(() => props.itemIds.flatMap((id, index) => {
-    const item = controlItem(id)
-    return item?.custom ? [{ id, item, key: `${index}:${id}` }] : []
-  }))
+  const itemIds = createMemo(() => props.itemIds.filter((id) => controlItem(id)?.custom === true))
 
   const settings = () => state.settings()
   const camera = () => settings()?.camera
@@ -544,23 +541,34 @@ export default function CustomSectionPanel(props: CustomSectionPanelProps) {
           </Field>
         )
 
-      case 'channels.status':
+      case 'channels.status': {
+        const channels = createMemo(() => channelStates(state.status()))
+        const channelCodes = createMemo(() => channels().map((c) => c.code))
         return (
-          <For each={channelStates(state.status())}>
-            {(channel) => (
-              <div class="nx-channel">
-                <div class="nx-channel-head">
-                  <Led tone={channelLedTone(channel)} />
-                  <span class="nx-channel-code">{channel.code}</span>
-                  <span class={`nx-channel-status ${channelStatusClass(channel)}`}>{channelStatusText(channel)}</span>
+          <For each={channelCodes()}>
+            {(code) => {
+              let cached: ChannelState | undefined
+              const channel = () => {
+                const found = channels().find((entry) => entry.code === code)
+                if (found) cached = found
+                return found ?? cached!
+              }
+              return (
+                <div class="nx-channel">
+                  <div class="nx-channel-head">
+                    <Led tone={channelLedTone(channel())} />
+                    <span class="nx-channel-code">{code}</span>
+                    <span class={`nx-channel-status ${channelStatusClass(channel())}`}>{channelStatusText(channel())}</span>
+                  </div>
+                  <Show when={channel().error}>
+                    <div class="nx-banner nx-banner-danger nx-channel-error" role="alert">{channel().error}</div>
+                  </Show>
                 </div>
-                <Show when={channel.error}>
-                  <div class="nx-banner nx-banner-danger nx-channel-error" role="alert">{channel.error}</div>
-                </Show>
-              </div>
-            )}
+              )
+            }}
           </For>
         )
+      }
 
       case 'streaming.webEnabled':
         return (
@@ -894,11 +902,11 @@ export default function CustomSectionPanel(props: CustomSectionPanelProps) {
       <Show when={locked()}>
         <div class="nx-banner nx-banner-neutral" role="status">{t('cam.adminHint')}</div>
       </Show>
-      <For each={entries()}>
-        {(entry) => (
-          <SettingItem id={entry.id}>
-            <div data-control-item={entry.id}>
-              {renderControl(entry.id)}
+      <For each={itemIds()}>
+        {(id) => (
+          <SettingItem id={id}>
+            <div data-control-item={id}>
+              {renderControl(id)}
             </div>
           </SettingItem>
         )}

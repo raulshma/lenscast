@@ -21,7 +21,7 @@ describe('InspectorPanelFrame', () => {
     const onHide = vi.fn()
     const { container } = render(() => (
       <InspectorPanelFrame
-        section={section}
+        section={() => section}
         readOnly={() => false}
         onToggleCollapsed={onToggleCollapsed}
         onHide={onHide}
@@ -57,7 +57,7 @@ describe('InspectorPanelFrame', () => {
     }
     render(() => (
       <InspectorPanelFrame
-        section={section}
+        section={() => section}
         readOnly={() => false}
         emptyState={<span>Nothing pinned here</span>}
       >
@@ -78,7 +78,7 @@ describe('InspectorPanelFrame', () => {
       items: [],
     }
     const { container } = render(() => (
-      <InspectorPanelFrame section={section} readOnly={() => true} onToggleCollapsed={vi.fn()} onHide={vi.fn()}>
+      <InspectorPanelFrame section={() => section} readOnly={() => true} onToggleCollapsed={vi.fn()} onHide={vi.fn()}>
         <Panel title="Custom"><span>Body</span></Panel>
       </InspectorPanelFrame>
     ))

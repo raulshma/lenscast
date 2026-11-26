@@ -1,7 +1,8 @@
-import { createSignal, For, onMount, Show } from 'solid-js'
+import { createSignal, For, onCleanup, onMount, Show } from 'solid-js'
 import type { AuditEntry, AuditLogResponse } from '../../../../../types'
 import { clearAuditLog, getAuditLog } from '../../../../../api/client'
 import { formatDateTime, t } from '../../../../../lib/i18n'
+import { observeChildTransitions } from '../../../lib/animateList'
 import { Panel, FieldRow, Button, Badge, Empty, ConfirmDialog } from '../../../ui'
 import { SettingItem, useInspectorSection } from '../../../ui/SettingItem'
 
@@ -70,8 +71,8 @@ export default function AuditPanel() {
     entry.outcome === 'ok' ? ('success' as const) : ('danger' as const)
 
   return (
-    <SettingItem id="audit.list">
-      <Panel title={t('audit.title')}>
+    <Panel title={t('audit.title')}>
+      <SettingItem id="audit.list">
       <FieldRow label={t('audit.recent')}>
         <div class="nx-deterrence">
           <Button size="sm" variant="ghost" disabled={busy()} onClick={refresh}>
@@ -88,7 +89,13 @@ export default function AuditPanel() {
         </span>
       </Show>
       <Show when={audit() && audit()!.entries.length > 0} fallback={<Empty title={t('audit.empty')} />}>
-        <ul class="nx-clients">
+        <ul
+          class="nx-clients"
+          ref={(el: HTMLUListElement) => {
+            const stop = observeChildTransitions(el, { animateHeight: true })
+            onCleanup(stop)
+          }}
+        >
           <For each={audit()!.entries}>
             {(entry) => (
               <li class="nx-clients-row">
@@ -122,7 +129,7 @@ export default function AuditPanel() {
         onConfirm={confirmClearLog}
         onClose={() => setConfirmClear(false)}
       />
-      </Panel>
-    </SettingItem>
+      </SettingItem>
+    </Panel>
   )
 }

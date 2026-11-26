@@ -244,6 +244,7 @@ export default function StreamPipHost(props: { state: NextState }) {
       <div class="nx-stream-host" ref={setHostEl}>
         <StreamPreview
           {...streamPreviewProps(state)}
+          compactActions
           interactionVisible={interactionVisible}
           stripOverlay={maskEditActive() ? undefined : () => <CameraStrip state={state} />}
           gesturesLocked={maskEditActive}

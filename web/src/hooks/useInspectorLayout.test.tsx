@@ -4,7 +4,7 @@ import { cleanup, render, renderHook } from '@solidjs/testing-library'
 import { createSignal } from 'solid-js'
 import type { NextState } from '../components/next/NextState'
 import type { WebUiLayoutDto } from '../types'
-import { defaultInspectorLayout, INSPECTOR_LAYOUT_STORAGE_KEY, setColumnWidth } from '../lib/inspectorLayout'
+import { defaultInspectorLayout, INSPECTOR_LAYOUT_STORAGE_KEY, setColumnWidth, toggleSectionCollapsed } from '../lib/inspectorLayout'
 import { useInspectorLayout } from './useInspectorLayout'
 
 const api = vi.hoisted(() => ({
@@ -299,5 +299,41 @@ describe('useInspectorLayout refresh and roles', () => {
     pending.resolve(setColumnWidth(defaultInspectorLayout(), 500, 'custom'))
     await settle()
     expect(controller.ready()).toBe(false)
+  })
+})
+
+describe('useInspectorLayout reference stability', () => {
+  it('keeps section object identity across an optimistic edit and its server echo', async () => {
+    // The column's <For> reconciles by reference: if the sanitized edit or
+    // the echoed save rebuilt every section, every panel would remount and
+    // re-fetch on a one-section toggle.
+    const { result } = mount()
+    await settle()
+    const before = result.layout().sections
+    result.mutate((layout) => toggleSectionCollapsed(layout, 'storage'))
+    const afterEdit = result.layout()
+    expect(afterEdit.sections[0]).toBe(before[0])
+    expect(afterEdit.sections[2]).toBe(before[2])
+    expect(afterEdit.sections[3]).toBe(before[3])
+    expect(afterEdit.sections[4]).toBe(before[4])
+    expect(afterEdit.sections[1]).not.toBe(before[1])
+    await vi.advanceTimersByTimeAsync(350)
+    expect(api.saveUiLayout).toHaveBeenCalledTimes(1)
+    const afterSave = result.layout()
+    expect(afterSave.sections[0]).toBe(before[0])
+    expect(afterSave.sections[1].collapsed).toBe(true)
+    expect(afterSave.updatedAtMs).toBe(1)
+  })
+
+  it('issues no write when an edit sanitizes back to the current document', async () => {
+    const { result } = mount()
+    await settle()
+    const reference = result.layout()
+    // The padded id survives inspectorLayoutsEqual but trims back to the
+    // current document — a no-op, not a save.
+    result.mutate((layout) => ({ ...layout, activePresetId: '  default  ' }))
+    expect(result.layout()).toBe(reference)
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(api.saveUiLayout).not.toHaveBeenCalled()
   })
 })

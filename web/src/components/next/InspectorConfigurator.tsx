@@ -1,6 +1,7 @@
-import { createMemo, createSignal, For, Show } from 'solid-js'
+import { createMemo, createSignal, For, onCleanup, Show } from 'solid-js'
 import type { NextState } from './NextState'
 import type { InspectorLayoutController } from '../../hooks/useInspectorLayout'
+import { observeChildTransitions } from './lib/animateList'
 import { t } from '../../lib/i18n'
 import {
   addBuiltinSection,
@@ -82,6 +83,7 @@ export default function InspectorConfigurator(props: Props) {
         .includes(needle)
     })
   })
+  const sectionOrderIds = createMemo(() => props.layout.layout().sections.map((section) => section.id))
   const selectedCustom = () => props.layout.layout().sections.find(
     (section) => section.id === selectedCustomId() && section.kind === 'custom',
   )
@@ -297,142 +299,156 @@ export default function InspectorConfigurator(props: Props) {
             <section class="nx-inspector-config-section" aria-labelledby="nx-inspector-order-title">
               <h3 id="nx-inspector-order-title">{t('next.inspector.configurator.order')}</h3>
               <p class="nx-inspector-config-hint">{t('next.inspector.configurator.reorderHint')}</p>
-              <div class="nx-inspector-order-list">
-                <For each={props.layout.layout().sections}>
-                  {(section, index) => (
+              <div
+                class="nx-inspector-order-list"
+                ref={(el: HTMLDivElement) => {
+                  const stop = observeChildTransitions(el, { animateHeight: true })
+                  onCleanup(stop)
+                }}
+              >
+                <For each={sectionOrderIds()}>
+                  {(placementId, index) => {
+                    let cached: WebUiSectionPlacementDto | undefined
+                    const section = () => {
+                      const found = props.layout.layout().sections.find((entry) => entry.id === placementId)
+                      if (found) cached = found
+                      return found ?? cached!
+                    }
+                    return (
                     <div
                       class="nx-inspector-order-row"
                       classList={{
-                        'nx-inspector-order-row-drag': dragOverId() === section.id,
-                        'nx-inspector-order-row-grabbed': grabbedId() === section.id,
-                        'nx-inspector-order-row-hidden': !section.visible,
+                        'nx-inspector-order-row-drag': dragOverId() === placementId,
+                        'nx-inspector-order-row-grabbed': grabbedId() === placementId,
+                        'nx-inspector-order-row-hidden': !section().visible,
                       }}
-                      data-placement-id={section.id}
+                      data-placement-id={placementId}
                       draggable={!readOnly()}
                       onDragStart={(event) => {
-                        setDraggedId(section.id)
-                        event.dataTransfer?.setData('text/plain', section.id)
+                        setDraggedId(placementId)
+                        event.dataTransfer?.setData('text/plain', placementId)
                         if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
                       }}
                       onDragOver={(event) => {
                         event.preventDefault()
-                        setDragOverId(section.id)
+                        setDragOverId(placementId)
                         if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
                       }}
-                      onDragLeave={() => setDragOverId((current) => current === section.id ? null : current)}
+                      onDragLeave={() => setDragOverId((current) => current === placementId ? null : current)}
                       onDrop={(event) => {
                         event.preventDefault()
-                        dropSection(section.id)
+                        dropSection(placementId)
                       }}
                       onDragEnd={() => {
                         setDraggedId(null)
                         setDragOverId(null)
                       }}
-                      onKeyDown={(event) => handleReorderKey(event, section)}
+                      onKeyDown={(event) => handleReorderKey(event, section())}
                     >
                       <button
                         type="button"
                         class="nx-inspector-drag-handle"
-                        aria-label={t('next.inspector.configurator.grab', { title: sectionTitle(section) })}
-                        aria-pressed={grabbedId() === section.id}
+                        aria-label={t('next.inspector.configurator.grab', { title: sectionTitle(section()) })}
+                        aria-pressed={grabbedId() === placementId}
                         disabled={readOnly()}
-                        onClick={() => setGrabbedId((current) => current === section.id ? null : section.id)}
+                        onClick={() => setGrabbedId((current) => current === placementId ? null : placementId)}
                       >
                         <span aria-hidden="true">⠿</span>
                       </button>
                       <div class="nx-inspector-order-main">
                         <Show
-                          when={section.kind === 'builtin'}
+                          when={section().kind === 'builtin'}
                           fallback={
                             <input
                               class="nx-input nx-inspector-title-input"
                               type="text"
                               maxlength={INSPECTOR_LAYOUT_LIMITS.maxTitleLength}
                               aria-label={t('next.inspector.configurator.customTitle')}
-                              value={section.customTitle ?? ''}
+                              value={section().customTitle ?? ''}
                               disabled={readOnly()}
-                              onInput={(event) => props.layout.mutate((current) => updateCustomSectionTitle(current, section.id, event.currentTarget.value))}
+                              onInput={(event) => props.layout.mutate((current) => updateCustomSectionTitle(current, placementId, event.currentTarget.value))}
                             />
                           }
                         >
-                          <span class="nx-inspector-order-title">{sectionTitle(section)}</span>
+                          <span class="nx-inspector-order-title">{sectionTitle(section())}</span>
                         </Show>
                         <span class="nx-inspector-order-meta">
-                          {section.kind === 'custom'
-                            ? t('next.inspector.configurator.pinnedCount', { count: section.items.length })
-                            : t(`next.inspector.configurator.category.${inspectorSection(section.sectionId)?.category ?? 'camera'}`)}
+                          {section().kind === 'custom'
+                            ? t('next.inspector.configurator.pinnedCount', { count: section().items.length })
+                            : t(`next.inspector.configurator.category.${inspectorSection(section().sectionId)?.category ?? 'camera'}`)}
                         </span>
                       </div>
                       <div class="nx-inspector-order-actions">
                         <button
                           type="button"
                           class="nx-icon-text-button"
-                          aria-label={t('next.inspector.configurator.moveUp', { title: sectionTitle(section) })}
+                          aria-label={t('next.inspector.configurator.moveUp', { title: sectionTitle(section()) })}
                           disabled={readOnly() || index() === 0}
-                          onClick={() => moveSection(section.id, -1)}
+                          onClick={() => moveSection(placementId, -1)}
                         >
                           <span aria-hidden="true">↑</span>
                         </button>
                         <button
                           type="button"
                           class="nx-icon-text-button"
-                          aria-label={t('next.inspector.configurator.moveDown', { title: sectionTitle(section) })}
+                          aria-label={t('next.inspector.configurator.moveDown', { title: sectionTitle(section()) })}
                           disabled={readOnly() || index() === props.layout.layout().sections.length - 1}
-                          onClick={() => moveSection(section.id, 1)}
+                          onClick={() => moveSection(placementId, 1)}
                         >
                           <span aria-hidden="true">↓</span>
                         </button>
                         <label class="nx-inspector-check">
                           <input
                             type="checkbox"
-                            checked={section.visible}
+                            checked={section().visible}
                             disabled={readOnly()}
-                            onChange={() => props.layout.mutate((current) => toggleSectionVisibility(current, section.id))}
+                            onChange={() => props.layout.mutate((current) => toggleSectionVisibility(current, placementId))}
                           />
                           <span>{t('next.inspector.configurator.visible')}</span>
                         </label>
                         <label class="nx-inspector-check">
                           <input
                             type="checkbox"
-                            checked={section.collapsed}
+                            checked={section().collapsed}
                             disabled={readOnly()}
-                            onChange={() => props.layout.mutate((current) => toggleSectionCollapsed(current, section.id))}
+                            onChange={() => props.layout.mutate((current) => toggleSectionCollapsed(current, placementId))}
                           />
                           <span>{t('next.inspector.configurator.collapsed')}</span>
                         </label>
                         <Button
                           size="sm"
                           variant="ghost"
-                          ariaLabel={t('next.inspector.configurator.items', { title: sectionTitle(section) })}
-                          ariaExpanded={expandedPlacementId() === section.id || selectedCustomId() === section.id}
+                          ariaLabel={t('next.inspector.configurator.items', { title: sectionTitle(section()) })}
+                          ariaExpanded={expandedPlacementId() === placementId || selectedCustomId() === placementId}
                           onClick={() => {
-                            if (section.kind === 'custom') {
-                              setSelectedCustomId(section.id)
+                            if (section().kind === 'custom') {
+                              setSelectedCustomId(placementId)
                               setExpandedPlacementId(null)
                             } else {
-                              setExpandedPlacementId((current) => current === section.id ? null : section.id)
+                              setExpandedPlacementId((current) => current === placementId ? null : placementId)
                               setSelectedCustomId(null)
                             }
                           }}
                         >
-                          {section.kind === 'custom' ? t('next.inspector.configurator.configureItems') : t('next.inspector.configurator.items', { title: sectionTitle(section) })}
+                          {section().kind === 'custom' ? t('next.inspector.configurator.configureItems') : t('next.inspector.configurator.items', { title: sectionTitle(section()) })}
                         </Button>
                         <button
                           type="button"
                           class="nx-icon-text-button nx-icon-text-button-danger"
-                          aria-label={t('next.inspector.configurator.remove', { title: sectionTitle(section) })}
+                          aria-label={t('next.inspector.configurator.remove', { title: sectionTitle(section()) })}
                           disabled={readOnly()}
                           onClick={() => {
-                            props.layout.mutate((current) => removeSection(current, section.id))
-                            if (selectedCustomId() === section.id) setSelectedCustomId(null)
-                            if (expandedPlacementId() === section.id) setExpandedPlacementId(null)
+                            props.layout.mutate((current) => removeSection(current, placementId))
+                            if (selectedCustomId() === placementId) setSelectedCustomId(null)
+                            if (expandedPlacementId() === placementId) setExpandedPlacementId(null)
                           }}
                         >
                           <span aria-hidden="true">×</span>
                         </button>
                       </div>
                     </div>
-                  )}
+                    )
+                  }}
                 </For>
               </div>
             </section>

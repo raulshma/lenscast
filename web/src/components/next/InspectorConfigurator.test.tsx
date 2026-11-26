@@ -176,4 +176,26 @@ describe('InspectorConfigurator', () => {
     expect(screen.queryByPlaceholderText(en['next.inspector.configurator.customTitlePlaceholder'])).toBeNull()
     expect((screen.getByRole('button', { name: 'Lens: Add' }) as HTMLButtonElement).disabled).toBe(true)
   })
+
+  it('keeps row DOM nodes mounted across visibility, collapse, and custom title edits', () => {
+    const { layout } = mount()
+    fireEvent.input(screen.getByPlaceholderText(en['next.inspector.configurator.customTitlePlaceholder']), {
+      target: { value: 'Rig' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: en['next.inspector.configurator.add'] }))
+    const customId = layout().sections.at(-1)!.id
+    const row = document.querySelector<HTMLElement>(`.nx-inspector-order-row[data-placement-id="${customId}"]`)!
+    const titleInput = within(row).getByLabelText(en['next.inspector.configurator.customTitle']) as HTMLInputElement
+
+    fireEvent.input(titleInput, { target: { value: 'Night Rig' } })
+    expect(document.querySelector(`.nx-inspector-order-row[data-placement-id="${customId}"]`)).toBe(row)
+    expect(within(row).getByLabelText(en['next.inspector.configurator.customTitle'])).toBe(titleInput)
+
+    fireEvent.click(within(row).getByLabelText(en['next.inspector.configurator.collapsed']))
+    expect(document.querySelector(`.nx-inspector-order-row[data-placement-id="${customId}"]`)).toBe(row)
+
+    fireEvent.click(within(row).getByLabelText(en['next.inspector.configurator.visible']))
+    expect(document.querySelector(`.nx-inspector-order-row[data-placement-id="${customId}"]`)).toBe(row)
+    expect(row.classList.contains('nx-inspector-order-row-hidden')).toBe(true)
+  })
 })

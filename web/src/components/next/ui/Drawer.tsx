@@ -56,7 +56,7 @@ export default function Drawer(props: Props) {
     onCleanup(() => {
       document.removeEventListener('keydown', onKeyDown)
       document.body.style.overflow = previousOverflow
-      if (previousFocus?.isConnected) previousFocus.focus()
+      if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true })
     })
   })
 

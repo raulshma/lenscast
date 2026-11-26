@@ -121,6 +121,7 @@
 }
 
 [data-ui='next'] .nx-log {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;

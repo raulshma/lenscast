@@ -6,6 +6,7 @@ import {
   defaultInspectorLayout,
   INSPECTOR_LAYOUT_STORAGE_KEY,
   inspectorLayoutsEqual,
+  preserveInspectorLayoutIdentity,
   sanitizeInspectorLayout,
 } from '../lib/inspectorLayout'
 
@@ -80,10 +81,12 @@ export function useInspectorLayout(state: NextState): InspectorLayoutController 
   function commit(next: WebUiLayoutDto): void {
     if (state.isViewer() || inspectorLayoutsEqual(next, layout())) return
     const sanitized = sanitizeInspectorLayout({ ...next, updatedAtMs: layout().updatedAtMs })
+    const preserved = preserveInspectorLayoutIdentity(layout(), sanitized)
+    if (preserved === layout()) return
     revision += 1
     dirty = true
-    setLayout(sanitized)
-    writeCachedLayout(sanitized)
+    setLayout(preserved)
+    writeCachedLayout(preserved)
     setError('')
     if (!localOnly()) scheduleSave()
   }
@@ -108,10 +111,10 @@ export function useInspectorLayout(state: NextState): InspectorLayoutController 
       if (flushRevision === revision) {
         dirty = false
         queued = false
-        setLayout(saved)
+        setLayout(preserveInspectorLayoutIdentity(layout(), saved))
         writeCachedLayout(saved)
       } else if (saved.updatedAtMs > layout().updatedAtMs) {
-        const rebased = { ...layout(), updatedAtMs: saved.updatedAtMs }
+        const rebased = preserveInspectorLayoutIdentity(layout(), { ...layout(), updatedAtMs: saved.updatedAtMs })
         setLayout(rebased)
         writeCachedLayout(rebased)
       }
@@ -153,10 +156,10 @@ export function useInspectorLayout(state: NextState): InspectorLayoutController 
       if (resetRevision === revision) {
         dirty = false
         queued = false
-        setLayout(saved)
+        setLayout(preserveInspectorLayoutIdentity(layout(), saved))
         writeCachedLayout(saved)
       } else if (saved.updatedAtMs > layout().updatedAtMs) {
-        const rebased = { ...layout(), updatedAtMs: saved.updatedAtMs }
+        const rebased = preserveInspectorLayoutIdentity(layout(), { ...layout(), updatedAtMs: saved.updatedAtMs })
         setLayout(rebased)
         writeCachedLayout(rebased)
       }
@@ -192,7 +195,7 @@ export function useInspectorLayout(state: NextState): InspectorLayoutController 
     revision += 1
     dirty = true
     const resetRevision = revision
-    setLayout(defaults)
+    setLayout(preserveInspectorLayoutIdentity(layout(), defaults))
     writeCachedLayout(defaults)
     setError('')
     if (localOnly()) return
@@ -224,7 +227,7 @@ export function useInspectorLayout(state: NextState): InspectorLayoutController 
       }
       if (inspectorLayoutsEqual(raw, previous)) return
       hasServerSnapshot = true
-      setLayout(raw)
+      setLayout(preserveInspectorLayoutIdentity(previous, raw))
       writeCachedLayout(raw)
       setError('')
     } catch (cause) {
@@ -248,7 +251,7 @@ export function useInspectorLayout(state: NextState): InspectorLayoutController 
       if (hydrateEpoch !== epoch || hydrateRevision !== revision) return
       if (!preserveDirty && !dirty) {
         hasServerSnapshot = true
-        setLayout(raw)
+        setLayout(preserveInspectorLayoutIdentity(layout(), raw))
         writeCachedLayout(raw)
         setError('')
       }

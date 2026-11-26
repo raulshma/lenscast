@@ -1,7 +1,9 @@
 /* Hallmark · shape: app screen · genre: modern-minimal · theme: Console (deal 1/3, seed operator-console-phone-as-camera-rig-9437·d469983a·2026-11-25·r0) · redesign: full
  * nav: rail-first sidebar kept, rebuilt · signature: the live stage · states: loading, empty, error, full · console: graphite
  * faces: Golos kept for cyrillic locales (theme face latin-only), Atkinson Hyperlegible Mono measures
- * axes: dark/grotesk-sans/chromatic-amber · posture: restrained · contrast: pass · v2.0.0 */
+ * axes: dark/grotesk-sans/chromatic-amber · posture: restrained · contrast: pass · v2.0.0
+ * redesign: polish (command ledge: grouped jobs, tally stop plates, grid-hug two-line break, 44px hits) · 2026-11-26
+ * finish-review: subagent · 4 findings · 4 resolved (ledge hug via grid placement, divider retarget 9 children, header one-row, mono badges) · Floor 0 FAIL */
 /* ══════════════════════════════════════════════════════════════════
    NEXT UI — LIVE VIEW (the deck's first screen; the picture leads)
    The stage is a --color-paper-3 well with one hairline frame around
@@ -150,12 +152,12 @@
   font-size: var(--text-sm);
   font-weight: 500;
   letter-spacing: 0;
-  color: var(--color-accent);
+  color: var(--color-accent-on-soft);
 }
 
 [data-ui='next'] .live-badge {
   background: var(--color-accent-soft);
-  color: var(--color-accent);
+  color: var(--color-accent-on-soft);
   font-family: var(--font-body);
   font-size: var(--text-xs);
   font-weight: var(--display-weight);
@@ -178,15 +180,29 @@
   box-shadow: none !important;
 }
 
-/* ── Command row: the hairline plate under the picture ──────────────
-   The floating glass bar is gone. The preview's own action row is a
-   quiet plate: paper-2, 1px rule; buttons read as outline keys; the
-   capture is the one amber action. */
+/* ── Command row: the hairline ledge under the picture ──────────────
+   The preview's action bar is a compact, single-row instrument ledge
+   hugging its keys — paper-2, 1px rule — grouped by job with crisp
+   hairline dividers: view (player, stats, fullscreen) | shutter |
+   streams (web, rtsp) | capture-utils (snap, share, talk) | label-mode
+   toggle. Secondary buttons collapse to 32px icon buttons with instant
+   Console tooltips while important actions (Capture, Web Stream, RTSP
+   Stream) retain full text; the trailing toggle lets the operator
+   switch to full-text labels anytime (persisted). */
 
 [data-ui='next'] .preview-actions {
+  position: relative;
+  z-index: var(--z-raised);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   flex-shrink: 0;
   flex-wrap: wrap;
   gap: var(--space-2xs);
+  /* The ledge hugs its keys — a tool at the picture's foot, never a
+     banner spanning an empty stage. */
+  width: fit-content;
+  max-width: 100%;
   padding: var(--space-2xs) var(--space-xs);
   background: var(--color-paper-2);
   border: 1px solid var(--color-rule);
@@ -194,15 +210,35 @@
 }
 
 [data-ui='next'] .preview-actions-left {
+  display: flex;
+  align-items: center;
   gap: var(--space-2xs);
   flex-wrap: wrap;
 }
 
+[data-ui='next'] .preview-actions-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+}
+
+[data-ui='next'] .preview-actions-divider {
+  display: block;
+  width: var(--rule-hair);
+  height: 18px;
+  margin: 0 var(--space-3xs);
+  background: var(--color-rule);
+  flex-shrink: 0;
+}
+
 /* Quiet outline key — the .nx-btn-secondary recipe at 32px. */
 [data-ui='next'] .action-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
   height: var(--control-h);
-  padding: 0 var(--space-sm);
-  gap: var(--space-xs);
+  padding: 0 10px;
+  gap: 6px;
   border: 1px solid var(--color-muted);
   border-radius: var(--radius-pill);
   background: transparent;
@@ -220,15 +256,28 @@
     transform var(--dur-micro) var(--ease-out);
 }
 
+/* The 44px hit target, drawn without changing the look. */
+[data-ui='next'] .action-btn::before {
+  content: '';
+  position: absolute;
+  inset: -6px;
+}
+
 [data-ui='next'] .action-btn svg {
-  width: 14px;
-  height: 14px;
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
 }
 
 [data-ui='next'] .action-btn:hover:not(:disabled) {
   background: var(--color-paper-3);
   border-color: var(--color-muted);
   color: var(--color-ink);
+}
+
+[data-ui='next'] .action-btn:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 1px;
 }
 
 [data-ui='next'] .action-btn:active:not(:disabled) {
@@ -241,6 +290,97 @@
   background: transparent;
 }
 
+/* Compact mode: secondary controls become crisp 32x32 icon buttons while
+   their text spans remain in the accessibility tree for screen readers. */
+[data-ui='next'] .preview-actions-compact .action-btn-icon {
+  width: var(--control-h);
+  padding: 0;
+  gap: 0;
+  justify-content: center;
+}
+
+[data-ui='next'] .preview-actions-compact .action-btn-icon > span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* In full-label mode, the trailing label-toggle button still stays compact. */
+[data-ui='next'] .preview-actions-toggle {
+  width: var(--control-h);
+  padding: 0;
+  gap: 0;
+  justify-content: center;
+}
+
+/* Styled Console tooltip — fast, keyboard-accessible, edge-aware. */
+[data-ui='next'] .preview-actions [data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  padding: 5px 9px;
+  background: var(--color-paper-2);
+  border: 1px solid var(--color-rule-2);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-overlay);
+  color: var(--color-ink);
+  font-family: var(--font-body);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  line-height: 1.3;
+  white-space: nowrap;
+  max-width: min(300px, 75vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  opacity: 0;
+  z-index: var(--z-tooltip);
+  transition:
+    opacity var(--dur-micro) var(--ease-out),
+    transform var(--dur-micro) var(--ease-out);
+}
+
+[data-ui='next'] .preview-actions-left > [data-tooltip]:first-child::after {
+  left: 0;
+  transform: translateY(4px);
+}
+
+[data-ui='next'] .preview-actions-toggle::after {
+  left: auto;
+  right: 0;
+  transform: translateY(4px);
+}
+
+[data-ui='next'] .preview-actions [data-tooltip]:focus-visible::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+[data-ui='next'] .preview-actions-left > [data-tooltip]:first-child:focus-visible::after,
+[data-ui='next'] .preview-actions-toggle:focus-visible::after {
+  transform: translateY(0);
+}
+
+@media (hover: hover) {
+  [data-ui='next'] .preview-actions [data-tooltip]:hover:not(:active)::after {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+
+  [data-ui='next'] .preview-actions-left > [data-tooltip]:first-child:hover:not(:active)::after,
+  [data-ui='next'] .preview-actions-toggle:hover:not(:active)::after {
+    transform: translateY(0);
+  }
+}
+
 /* Capture — the one amber action on the row. The hover reset yields
    while pressed (:not(:active)) so the press scale answers, and the
    classic glow-lift stays cancelled the rest of the time. */
@@ -248,6 +388,7 @@
   background: var(--color-accent);
   border-color: var(--color-accent);
   color: var(--color-accent-ink);
+  font-weight: 600;
 }
 
 [data-ui='next'] .action-btn-primary:hover:not(:disabled):not(:active) {
@@ -266,26 +407,55 @@
   opacity: 1;
 }
 
-/* Start/stop lanes ride the same quiet outline — the labels say it. */
-[data-ui='next'] .action-btn-success,
-[data-ui='next'] .action-btn-warning {
+/* An available lane: the deck's job answers at full ink, one step above
+   the ghost keys around it — the play triangle carries the offer. */
+[data-ui='next'] .action-btn-success {
   background: transparent;
   border-color: var(--color-muted);
-  color: var(--color-ink-2);
+  color: var(--color-ink);
+  font-weight: 600;
 }
 
-[data-ui='next'] .action-btn-success:hover:not(:disabled),
-[data-ui='next'] .action-btn-warning:hover:not(:disabled) {
+[data-ui='next'] .action-btn-success:hover:not(:disabled) {
   background: var(--color-paper-3);
   border-color: var(--color-muted);
   color: var(--color-ink);
 }
 
-/* Toggled (a latched on state) — the amber presence. */
+/* On air: the lane's Stop wears the latched amber-soft plate — the
+   tally's voice on the row (the rack's ON AIR, the LIVE badge), not a
+   new signal. Toned text on the soft plate reads --color-accent-on-soft. */
+[data-ui='next'] .action-btn-warning {
+  background: var(--color-accent-soft);
+  border-color: color-mix(in oklab, var(--color-accent) 40%, transparent);
+  color: var(--color-accent-on-soft);
+  font-weight: 600;
+}
+
+[data-ui='next'] .action-btn-warning:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--color-accent) 12%, var(--color-accent-soft));
+  border-color: color-mix(in oklab, var(--color-accent) 55%, transparent);
+  color: var(--color-accent-on-soft);
+}
+
+/* Toggled (a latched on state) — the amber presence, toned for the
+   plate it sits on. */
 [data-ui='next'] .action-btn-toggled {
   background: var(--color-accent-soft);
-  border-color: transparent;
-  color: var(--color-accent);
+  border-color: color-mix(in oklab, var(--color-accent) 40%, transparent);
+  color: var(--color-accent-on-soft);
+}
+
+[data-ui='next'] .action-btn-toggled:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--color-accent) 12%, var(--color-accent-soft));
+  border-color: color-mix(in oklab, var(--color-accent) 55%, transparent);
+  color: var(--color-accent-on-soft);
+}
+
+/* Subdued (explicitly off, e.g. Stats: OFF). */
+[data-ui='next'] .action-btn-muted {
+  border-color: var(--color-rule);
+  color: var(--color-faint);
 }
 
 /* Talkback live: your voice is going out — on air, the amber presence.
@@ -293,7 +463,7 @@
 [data-ui='next'] .action-btn-talking {
   background: var(--color-accent-soft);
   border-color: color-mix(in oklab, var(--color-accent) 40%, transparent);
-  color: var(--color-accent);
+  color: var(--color-accent-on-soft);
   animation: none;
 }
 
@@ -382,7 +552,7 @@
 [data-ui='next'] .nx-cam-strip .nx-chip-active:hover:not(:disabled) {
   background: var(--color-accent-soft);
   border-color: transparent;
-  color: var(--color-accent);
+  color: var(--color-accent-on-soft);
 }
 
 [data-ui='next'] .nx-cam-strip .nx-chip:disabled {
@@ -709,6 +879,7 @@
    Audit/Auth/Push panels reuse this vocabulary. */
 
 [data-ui='next'] .nx-clients {
+  position: relative;
   list-style: none;
   margin: 0;
   padding: 0;
@@ -863,22 +1034,41 @@
     border-left: none;
     padding-left: 0;
   }
+
+  [data-ui='next'] .preview-actions-right {
+    margin-left: auto;
+  }
+
+  [data-ui='next'] .preview-actions-right > .preview-actions-divider {
+    display: none;
+  }
+}
+
+/* Reduced motion: the breathing dot stands still; the row's colour
+   answers land instantly (base.css collapses the rest globally). */
+@media (prefers-reduced-motion: reduce) {
+  [data-ui='next'] .recording-dot {
+    animation: none;
+  }
 }
 
 /* Below 480px App.css strips every action label, which turns the two stream
-   lanes into identical unlabelled squares (the start pair is a matching pair
-   of bare play triangles). The lane state — Start/Stop Web vs RTSP — is the
-   one thing on this row that cannot be guessed from an icon, so their labels
-   stay; the row wraps and the ghost buttons still collapse to icons. */
+   lanes into identical unlabelled squares and hides the Capture label. Keep
+   the important action labels (Capture, Web Stream, RTSP Stream) visible on
+   mobile too — and when the user explicitly selects full-label mode, keep
+   every button label visible. */
 @media (max-width: 480px) {
+  [data-ui='next'] .action-btn-primary span,
   [data-ui='next'] .action-btn-success span,
-  [data-ui='next'] .action-btn-warning span {
+  [data-ui='next'] .action-btn-warning span,
+  [data-ui='next'] .preview-actions-full .action-btn span {
     display: inline;
   }
 
+  [data-ui='next'] .action-btn-primary,
   [data-ui='next'] .action-btn-success,
   [data-ui='next'] .action-btn-warning {
-    padding: 0 var(--space-sm);
+    padding: 0 10px;
   }
 
   [data-ui='next'] .nx-cam-strip .nx-slider {
