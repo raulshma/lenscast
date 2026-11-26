@@ -2,6 +2,8 @@ import { Show, For, createSignal } from 'solid-js'
 import type { MaskingType, MaskingZone, StreamingSettings } from '../../../../../types'
 import { MASKING_TYPE_LABELS } from '../../../../../types'
 import { t } from '../../../../../lib/i18n'
+import { hashRouter } from '../../../../../lib/router'
+import { startMaskEdit } from '../../../../../lib/maskEditStore'
 import { Panel, FieldRow, ToggleField, Select, TextInput, SliderField, Button, Badge, Empty, Led } from '../../../ui'
 
 /** Wire value → i18n key for the masking-type options. */
@@ -14,37 +16,42 @@ const MASK_KEYS: Record<MaskingType, string> = {
 interface Props {
   streaming: () => StreamingSettings
   onUpdate: (patch: Partial<StreamingSettings>) => void
+  /**
+   * True while the device's web stream is on air. A zone is placed on that
+   * picture, so without it "Edit zones" and every zone row's open key stand
+   * down and say why.
+   */
+  streamActive: () => boolean
 }
 
-function generateId(): string {
-  return crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
-}
-
-function createDefaultZone(): MaskingZone {
-  return {
-    id: generateId(),
-    label: '',
-    enabled: true,
-    type: 'BLACKOUT',
-    x: 0.1,
-    y: 0.1,
-    width: 0.3,
-    height: 0.3,
-    pixelateSize: 16,
-    blurRadius: 10,
-  }
-}
-
+/**
+ * Privacy Masking, in the beta System view (Camera → Overlays): the master
+ * switch, the zones, and the way into the visual editor — because where a
+ * zone sits is drawn on the live picture, not typed. "Edit zones" opens the
+ * editor with no zone selected; a zone row's key opens it on that zone.
+ *
+ * What stays in this panel is what the picture cannot say: the label, the
+ * type and its strength, whether a zone is switched on, and removing it —
+ * saved through `onUpdate`, like every other control here.
+ *
+ * Both ways in are one call sequence, in one handler: arm the edit
+ * (maskEditStore), then route to Live, which owns the editor and answers
+ * the arm. An arm that is not followed to Live would stay armed with the
+ * dock's camera strip hidden and nothing on screen to finish it, so one
+ * never happens without the other — and neither is offered without a web
+ * stream, the picture zones are drawn on.
+ */
 export default function PrivacyMaskingPanel(props: Props) {
   const s = () => props.streaming()
   const zones = () => s().maskingZones ?? []
   const [expandedZoneId, setExpandedZoneId] = createSignal<string | null>(null)
+  const router = hashRouter()
 
-  function addZone() {
-    const newZone = createDefaultZone()
-    props.onUpdate({ maskingZones: [...zones(), newZone] })
-    setExpandedZoneId(newZone.id)
+  /** The zone's own label, or its number in the list. */
+  function zoneName(zone: MaskingZone): string {
+    return zone.label || t('privacy.zone', { n: zones().indexOf(zone) + 1 })
   }
+
   function removeZone(id: string) {
     props.onUpdate({ maskingZones: zones().filter((z) => z.id !== id) })
     if (expandedZoneId() === id) setExpandedZoneId(null)
@@ -60,6 +67,12 @@ export default function PrivacyMaskingPanel(props: Props) {
     setExpandedZoneId((prev) => (prev === id ? null : id))
   }
 
+  /** Open the visual editor over the Live stage — on `zoneId`, when a row names its zone. */
+  function openEditor(zoneId?: string) {
+    startMaskEdit(zoneId)
+    router.navigate({ name: 'live' })
+  }
+
   return (
     <Panel
       title={t('privacy.title')}
@@ -72,53 +85,83 @@ export default function PrivacyMaskingPanel(props: Props) {
       />
 
       <Show when={s().maskingEnabled}>
-        <FieldRow label={t('privacy.zones', { count: zones().length })}>
-          <Button size="sm" variant="primary" onClick={addZone} ariaLabel={t('privacy.addZone')}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-            {t('privacy.addZone')}
+        {/* The reason stands on the row as text, not only in the button's
+            tooltip: a disabled button is not one a keyboard or screen
+            reader user can reach to hear it. */}
+        <FieldRow
+          label={t('privacy.zones', { count: zones().length })}
+          hint={props.streamActive() ? undefined : t('privacy.streamOffHint')}
+        >
+          <Button
+            size="sm"
+            variant="primary"
+            disabled={!props.streamActive()}
+            title={props.streamActive() ? t('privacy.editZoneTitle') : t('privacy.streamOffHint')}
+            ariaLabel={t('privacy.editZoneTitle')}
+            onClick={() => openEditor()}
+          >
+            {t('privacy.editZones')}
           </Button>
         </FieldRow>
 
         <For each={zones()}>
           {(zone) => (
             <>
-              <div class="nx-list-row" style={{ cursor: 'pointer' }} onClick={() => toggleZoneExpanded(zone.id)}>
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  aria-hidden="true"
-                  style={{
-                    transform: expandedZoneId() === zone.id ? 'rotate(90deg)' : 'none',
-                    transition: 'transform var(--dur-micro) var(--ease-out)',
-                  }}
+              {/* One zone per row. The row itself takes no click: its open
+                  key is a real button, and the disclosure and the × beside
+                  it are that button's siblings — a press on either is its
+                  own, and never opens the editor. */}
+              <div class="nx-list-row" data-zone-id={zone.id}>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  icon
+                  ariaLabel={zoneName(zone)}
+                  title={zoneName(zone)}
+                  ariaExpanded={expandedZoneId() === zone.id}
+                  onClick={() => toggleZoneExpanded(zone.id)}
                 >
-                  <polyline points="9 18 15 12 9 6" />
-                </svg>
-                <span class="nx-field-label" style={{ flex: 1 }}>
-                  {zone.label || t('privacy.zone', { n: zones().indexOf(zone) + 1 })}
-                </span>
-                {/* The zone's type is a reading, not a selection: quiet
-                    neutral/cool tags, never the amber of a chosen chip. */}
-                <Badge tone={zone.type === 'BLACKOUT' ? 'neutral' : 'info'}>
-                  {t(MASK_KEYS[zone.type])}
-                </Badge>
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    aria-hidden="true"
+                    style={{
+                      transform: expandedZoneId() === zone.id ? 'rotate(90deg)' : 'none',
+                      transition: 'transform var(--dur-micro) var(--ease-out)',
+                    }}
+                  >
+                    <polyline points="9 18 15 12 9 6" />
+                  </svg>
+                </Button>
+                {/* The key says which zone it opens before what it does:
+                    the name is on screen inside it, and a list of keys all
+                    called the same thing tells a screen reader nothing. */}
+                <Button
+                  class="nx-privacy-zone-open"
+                  variant="ghost"
+                  disabled={!props.streamActive()}
+                  title={props.streamActive() ? t('privacy.editZoneTitle') : t('privacy.streamOffHint')}
+                  ariaLabel={`${zoneName(zone)} · ${t('privacy.editZoneTitle')}`}
+                  onClick={() => openEditor(zone.id)}
+                >
+                  <span class="nx-field-label nx-privacy-zone-name">{zoneName(zone)}</span>
+                  {/* The zone's type is a reading, not a selection: quiet
+                      neutral/cool tags, never the amber of a chosen chip. */}
+                  <Badge tone={zone.type === 'BLACKOUT' ? 'neutral' : 'info'}>
+                    {t(MASK_KEYS[zone.type])}
+                  </Badge>
+                </Button>
                 <Button
                   size="sm"
                   variant="danger-soft"
                   icon
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    removeZone(zone.id)
-                  }}
                   title={t('privacy.removeZone')}
                   ariaLabel={t('privacy.removeZone')}
+                  onClick={() => removeZone(zone.id)}
                 >
                   ×
                 </Button>
@@ -152,46 +195,6 @@ export default function PrivacyMaskingPanel(props: Props) {
                     />
                   </FieldRow>
 
-                  <SliderField
-                    label={t('privacy.x')}
-                    display={`${Math.round(zone.x * 100)}%`}
-                    min={0}
-                    max={100}
-                    step={1}
-                    value={Math.round(zone.x * 100)}
-                    onChange={(v) => updateZone(zone.id, { x: v / 100 })}
-                  />
-
-                  <SliderField
-                    label={t('privacy.y')}
-                    display={`${Math.round(zone.y * 100)}%`}
-                    min={0}
-                    max={100}
-                    step={1}
-                    value={Math.round(zone.y * 100)}
-                    onChange={(v) => updateZone(zone.id, { y: v / 100 })}
-                  />
-
-                  <SliderField
-                    label={t('privacy.width')}
-                    display={`${Math.round(zone.width * 100)}%`}
-                    min={1}
-                    max={100}
-                    step={1}
-                    value={Math.round(zone.width * 100)}
-                    onChange={(v) => updateZone(zone.id, { width: v / 100 })}
-                  />
-
-                  <SliderField
-                    label={t('privacy.height')}
-                    display={`${Math.round(zone.height * 100)}%`}
-                    min={1}
-                    max={100}
-                    step={1}
-                    value={Math.round(zone.height * 100)}
-                    onChange={(v) => updateZone(zone.id, { height: v / 100 })}
-                  />
-
                   <Show when={zone.type === 'PIXELATE'}>
                     <SliderField
                       label={t('privacy.pixelSize')}
@@ -221,8 +224,10 @@ export default function PrivacyMaskingPanel(props: Props) {
           )}
         </For>
 
+        {/* The beta panel's own empty state: privacy.empty names "Add Zone",
+            a button only the classic card has. */}
         <Show when={zones().length === 0}>
-          <Empty title={t('privacy.empty')} />
+          <Empty title={t('privacy.editor.empty')} />
         </Show>
       </Show>
     </Panel>

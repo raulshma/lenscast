@@ -5,6 +5,7 @@
 @import "./styles/next/layout.css";
 @import "./styles/next/views/cards.css";
 @import "./styles/next/views/live.css";
+@import "./styles/next/views/masking.css";
 @import "./styles/next/views/detection.css";
 @import "./styles/next/views/media.css";
 @import "./styles/next/pip.css";

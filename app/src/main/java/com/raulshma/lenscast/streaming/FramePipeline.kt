@@ -135,7 +135,7 @@ class FramePipeline(
         try {
             var jpegData = yuvToJpeg(frame.yuvData, frame.width, frame.height, frame.quality, frame.rotation) ?: return
 
-            if (frame.overlay.enabled) {
+            if (OverlayLayoutPolicy.overlayPassNeeded(frame.overlay)) {
                 val decoded = BitmapFactory.decodeByteArray(jpegData, 0, jpegData.size)
                 if (decoded != null) {
                     val withOverlay = StreamOverlayRenderer.applyOverlay(decoded, frame.overlay, frame.clientCount)

@@ -216,4 +216,40 @@ class OverlayLayoutPolicyTest {
         assertNull(OverlayLayoutPolicy.parseColorOrNull("#ZZZ"))
         assertNull(OverlayLayoutPolicy.parseColorOrNull("#FFF"))
     }
+
+    @Test
+    fun `overlay pass runs when the text overlay is enabled`() {
+        assertTrue(OverlayLayoutPolicy.overlayPassNeeded(OverlaySettings(enabled = true)))
+    }
+
+    @Test
+    fun `overlay pass is skipped when overlay and masking are both off`() {
+        assertFalse(OverlayLayoutPolicy.overlayPassNeeded(OverlaySettings()))
+        // Masking master off starves even enabled zones — no pass without the switch.
+        assertFalse(
+            OverlayLayoutPolicy.overlayPassNeeded(
+                OverlaySettings(enabled = false, maskingEnabled = false, maskingZones = listOf(MaskingZone())),
+            ),
+        )
+    }
+
+    @Test
+    fun `overlay pass is skipped when masking is on with no enabled zones`() {
+        val settings = OverlaySettings(
+            enabled = false,
+            maskingEnabled = true,
+            maskingZones = listOf(MaskingZone(enabled = false), MaskingZone(enabled = false)),
+        )
+        assertFalse(OverlayLayoutPolicy.overlayPassNeeded(settings))
+    }
+
+    @Test
+    fun `overlay pass runs when masking is on with an enabled zone`() {
+        val settings = OverlaySettings(
+            enabled = false,
+            maskingEnabled = true,
+            maskingZones = listOf(MaskingZone(enabled = false), MaskingZone(enabled = true)),
+        )
+        assertTrue(OverlayLayoutPolicy.overlayPassNeeded(settings))
+    }
 }

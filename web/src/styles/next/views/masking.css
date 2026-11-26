@@ -1,0 +1,592 @@
+/* Hallmark · shape: app screen · genre: modern-minimal · theme: Console (deal 1/3, seed operator-console-phone-as-camera-rig-9437·d469983a·2026-11-25·r0) · redesign: full
+ * nav: rail-first sidebar kept, rebuilt · signature: the live stage · states: loading, empty, error, full · console: graphite
+ * faces: Golos kept for cyrillic locales (theme face latin-only), Atkinson Hyperlegible Mono measures
+ * axes: dark/grotesk-sans/chromatic-amber · posture: restrained · contrast: pass · v2.0.0 */
+/* ══════════════════════════════════════════════════════════════════
+   NEXT UI — MASKING-ZONE EDITOR (the picture layer)
+   The editor draws on the Live stage's picture. Its layer fills the
+   preview container and ignores the pointer; the one interactive part
+   is the picture itself (.nx-mask-picture), sized to the frame. Amber is
+   the operator's act here as everywhere: the selected zone, its handles,
+   the rubber band.
+   Two surfaces, two recipes. The marks sit ON VIDEO, not on a surface,
+   so each is two-tone — the theme's line outside, a paper line inside
+   (dark on pale in the dark colourway, pale on dark in the light one):
+   one of the two reads over a white wall and over a black room alike.
+   The chips are paper plates with ink text, legible in both colourways.
+   Nothing moves here but the operator: no transitions, no animation.
+   The chrome (edit bar, zone inspector) is appended below by a later
+   phase.
+   ══════════════════════════════════════════════════════════════════ */
+
+/* ── The layer ─────────────────────────────────────────────────────── */
+/* Above the stats indicator (10), the camera strip (12) and the focus
+   ring (15); below the fullscreen exit and hint (20), which stay
+   reachable while an edit is open. The ladder is the container's own
+   (App.css .cam-strip-host, live.css). */
+[data-ui='next'] .nx-mask-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 16;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* The picture: the only part that takes the pointer. touch-action none
+   keeps a drag from scrolling the page. */
+[data-ui='next'] .nx-mask-picture {
+  position: absolute;
+  pointer-events: auto;
+  touch-action: none;
+  cursor: default;
+}
+
+/* Drawing is armed: the crosshair says a drag will draw a zone. */
+[data-ui='next'] .nx-mask-picture.nx-mask-drawing {
+  cursor: crosshair;
+}
+
+/* The focus ring, inset: the picture runs to its frame's edge, so an
+   outset ring would be clipped by the container. */
+[data-ui='next'] .nx-mask-picture:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: -2px;
+}
+
+/* ── Waiting for the picture ───────────────────────────────────────── */
+/* A quiet paper chip at the centre of the stage. */
+[data-ui='next'] .nx-mask-waiting {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  max-width: calc(100% - var(--space-xl));
+  padding: var(--space-2xs) var(--space-sm);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-pill);
+  background: var(--color-paper-2);
+  color: var(--color-ink-2);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+  text-align: center;
+}
+
+/* ── Zones ─────────────────────────────────────────────────────────── */
+/* Percentages of the picture (the component positions them), so a drag
+   never needs a re-measure. The outer line is the theme's ink; ::after
+   draws the paper hairline just inside it. */
+[data-ui='next'] .nx-mask-zone {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px solid var(--color-ink);
+  cursor: move;
+  touch-action: none;
+}
+
+[data-ui='next'] .nx-mask-zone::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--color-paper);
+  pointer-events: none;
+}
+
+/* Selected: the amber presence — the accent outline, a wash of the same,
+   and lifted above its neighbours so its handles stay reachable. */
+[data-ui='next'] .nx-mask-zone-selected {
+  z-index: 1;
+  border: 2px solid var(--color-accent);
+  background: color-mix(in oklab, var(--color-accent) 14%, transparent);
+}
+
+/* The keyboard's path to a zone: the kit's focus ring, outset. */
+[data-ui='next'] .nx-mask-zone:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+/* A disabled zone is not painted by the device: dashed and quiet — still
+   a zone, so it is selected, moved and resized like any other. */
+[data-ui='next'] .nx-mask-zone-disabled {
+  border-style: dashed;
+  border-color: var(--color-muted);
+}
+
+[data-ui='next'] .nx-mask-zone-selected.nx-mask-zone-disabled {
+  border-style: dashed;
+  border-color: var(--color-accent);
+}
+
+/* ── The selected zone's name ───────────────────────────────────────── */
+/* A chip above the zone's top-left corner, clear of the handles (they
+   stand 6px proud of the edge). Near the picture's top edge it tucks
+   inside the zone; in the right half it grows leftwards — it never leaves
+   the picture. */
+[data-ui='next'] .nx-mask-zone-label {
+  position: absolute;
+  left: 0;
+  bottom: 100%;
+  margin-bottom: var(--space-xs);
+  display: inline-block;
+  box-sizing: border-box;
+  max-width: 160px;
+  height: 24px;
+  padding: 0 var(--space-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-pill);
+  background: var(--color-paper-2);
+  color: var(--color-ink);
+  font-family: var(--font-body);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  line-height: 22px;
+  pointer-events: auto;
+}
+
+[data-ui='next'] .nx-mask-zone-label-inside {
+  bottom: auto;
+  top: var(--space-xs);
+  margin-bottom: 0;
+}
+
+[data-ui='next'] .nx-mask-zone-label-right {
+  left: auto;
+  right: 0;
+}
+
+/* ── Resize handles ─────────────────────────────────────────────────── */
+/* 12px visible, a 28px hit: ::before expands the target without changing
+   the look (the kit's technique). Each sits centred on its edge or
+   corner, half outside the zone, so a zone flush with the picture's edge
+   keeps the whole hit. Pointer-only: never in the tab order. */
+[data-ui='next'] .nx-mask-handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  box-sizing: border-box;
+  border: 1px solid var(--color-paper);
+  border-radius: 50%;
+  background: var(--color-accent);
+  touch-action: none;
+}
+
+[data-ui='next'] .nx-mask-handle::before {
+  content: '';
+  position: absolute;
+  inset: -8px;
+}
+
+[data-ui='next'] .nx-mask-handle:hover {
+  background: var(--color-accent-strong);
+}
+
+[data-ui='next'] .nx-mask-handle-n {
+  top: -6px;
+  left: calc(50% - 6px);
+  cursor: ns-resize;
+}
+
+[data-ui='next'] .nx-mask-handle-s {
+  bottom: -6px;
+  left: calc(50% - 6px);
+  cursor: ns-resize;
+}
+
+[data-ui='next'] .nx-mask-handle-e {
+  top: calc(50% - 6px);
+  right: -6px;
+  cursor: ew-resize;
+}
+
+[data-ui='next'] .nx-mask-handle-w {
+  top: calc(50% - 6px);
+  left: -6px;
+  cursor: ew-resize;
+}
+
+[data-ui='next'] .nx-mask-handle-ne {
+  top: -6px;
+  right: -6px;
+  cursor: nesw-resize;
+}
+
+[data-ui='next'] .nx-mask-handle-sw {
+  bottom: -6px;
+  left: -6px;
+  cursor: nesw-resize;
+}
+
+[data-ui='next'] .nx-mask-handle-nw {
+  top: -6px;
+  left: -6px;
+  cursor: nwse-resize;
+}
+
+[data-ui='next'] .nx-mask-handle-se {
+  bottom: -6px;
+  right: -6px;
+  cursor: nwse-resize;
+}
+
+/* ── The rubber band ────────────────────────────────────────────────── */
+/* A draw in flight, from the first pixel of movement. */
+[data-ui='next'] .nx-mask-rubber {
+  position: absolute;
+  z-index: 2;
+  box-sizing: border-box;
+  border: 1px solid var(--color-accent);
+  background: color-mix(in oklab, var(--color-accent) 14%, transparent);
+  pointer-events: none;
+}
+
+/* ── The live readout ───────────────────────────────────────────────── */
+/* W% × H% of the rectangle being changed: a measured value, so the
+   instrument's face (.nx-mono), on a paper chip. Below the rectangle's
+   bottom-right corner while there is room; at the picture's bottom edge
+   it flips above, to the corner opposite the selected zone's label (the
+   component chooses and positions it in percentages; the corner is a
+   transform). The gap clears the handles, which stand 6px proud. */
+[data-ui='next'] .nx-mask-dims {
+  position: absolute;
+  z-index: 3;
+  box-sizing: border-box;
+  height: 24px;
+  padding: 0 var(--space-xs);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-pill);
+  background: var(--color-paper-2);
+  color: var(--color-ink);
+  font-size: var(--text-xs);
+  line-height: 22px;
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translate(-100%, var(--space-xs));
+}
+
+[data-ui='next'] .nx-mask-dims-above {
+  transform: translate(-100%, calc(-100% - var(--space-xs)));
+}
+
+[data-ui='next'] .nx-mask-dims-above.nx-mask-dims-left {
+  transform: translate(0, calc(-100% - var(--space-xs)));
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   THE EDITOR'S CHROME — the Live view while an edit is open
+   The picture layer above is drawn ON VIDEO and speaks in two-tone lines
+   and paper chips. The chrome around it is ordinary console surface and
+   follows the kit: hairline plates of paper-2 cut from the well, Golos
+   speaking, the instrument's face only for measured numbers. Amber stays
+   where the operator acts — "Done", the armed "Add zone", the selected
+   row — and nowhere else: the picture already carries the selection.
+   Every rule is keyed on .nx-mask-* (the view's root wears .nx-mask-editing
+   while an edit runs), so they win over live.css and layout.css by
+   specificity without either file changing.
+   ══════════════════════════════════════════════════════════════════ */
+
+/* ── The Live view while an edit is open ───────────────────────────── */
+/* Normally the well (.preview-section, paper-3) IS the stage, padding
+   included. With a bar above it the well is pulled up to the stage's own
+   top edge so the bar sits inside it — the first plate cut into the well,
+   where the command row is the last — and the section's own top padding
+   yields to the bar's margin above it. Same padding, same well, one
+   continuous surface. */
+[data-ui='next'] .nx-mask-editing .nx-stage {
+  background: var(--color-paper-3);
+}
+
+[data-ui='next'] .nx-mask-editing .nx-stage-slot .preview-section {
+  padding-top: var(--space-sm);
+}
+
+/* ── The edit bar ──────────────────────────────────────────────────── */
+/* One hairline plate between the command row's own left and right edges
+   (the well's padding): title, one contextual hint, and the two verbs the
+   picture cannot carry. It never shrinks — the picture below gives — and
+   on a narrow stage the verbs wrap under the words rather than squeeze
+   them. */
+[data-ui='next'] .nx-mask-bar {
+  flex-shrink: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2xs) var(--space-sm);
+  margin: var(--space-md) var(--space-md) 0;
+  padding: var(--space-2xs) var(--space-xs);
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-card);
+  background: var(--color-paper-2);
+}
+
+/* The basis is the room the words need; under it, the verbs wrap. */
+[data-ui='next'] .nx-mask-bar-text {
+  flex: 1 1 160px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+[data-ui='next'] .nx-mask-bar-title {
+  font-size: var(--text-sm);
+  font-weight: var(--display-weight);
+  letter-spacing: var(--tracking-display);
+  line-height: 1.4;
+  color: var(--color-ink);
+}
+
+/* The hint is chrome: quiet ink, never a chip. */
+[data-ui='next'] .nx-mask-bar-hint,
+[data-ui='next'] .nx-mask-bar-keys {
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  color: var(--color-muted);
+}
+
+[data-ui='next'] .nx-mask-bar-actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  /* Right-aligned on the line it lands on — beside the words, or under. */
+  margin-left: auto;
+}
+
+/* ── The zone inspector ────────────────────────────────────────────── */
+/* The inspector column's content while an edit runs: the list panel, then
+   the selected zone's. Plain panels on the ground, as the normal decks. */
+[data-ui='next'] .nx-mask-inspector {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  min-width: 0;
+}
+
+[data-ui='next'] .nx-mask-hint {
+  padding: 0 var(--space-2xs);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--color-muted);
+}
+
+/* The masking master switch is off: the inspector leads with the reason —
+   the painted zones will not reach the stream — and the compact action.
+   The kit's warning banner paints it (amber at soft strength, the
+   operator's-attention voice); these rules only give the words the room
+   the action leaves. */
+[data-ui='next'] .nx-mask-warn-text {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Many zones must not push the selected zone's settings out of the column:
+   the list scrolls on its own past this height. */
+[data-ui='next'] .nx-mask-zone-list {
+  display: flex;
+  flex-direction: column;
+  max-height: min(320px, 40vh);
+  overflow-y: auto;
+}
+
+/* ── One zone in the list ──────────────────────────────────────────── */
+/* A 40px row (the tall control and one grid step) cut from its neighbours
+   by a hairline: the name and its type are the pick (a button, the whole
+   left of the row); the zone's own switch is the right. Clicking the row
+   selects; the switch turns that zone off without touching the selection.
+   The selected row wears the amber presence — the kit's selection fill and
+   its edge. */
+[data-ui='next'] .nx-mask-zone-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  min-height: calc(var(--control-h-tall) + var(--space-2xs));
+  padding-right: var(--space-sm);
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  transition:
+    background var(--dur-micro) var(--ease-out),
+    border-color var(--dur-micro) var(--ease-out);
+}
+
+[data-ui='next'] .nx-mask-zone-row + .nx-mask-zone-row {
+  border-top-color: var(--color-rule);
+}
+
+/* No hairline under the selected row: its amber edge is the seam. */
+[data-ui='next'] .nx-mask-zone-row-selected + .nx-mask-zone-row {
+  border-top-color: transparent;
+}
+
+[data-ui='next'] .nx-mask-zone-row:hover {
+  background: var(--color-paper-3);
+}
+
+[data-ui='next'] .nx-mask-zone-row-selected,
+[data-ui='next'] .nx-mask-zone-row-selected:hover {
+  background: var(--color-accent-soft);
+  border-color: color-mix(in oklab, var(--color-accent) 40%, transparent);
+}
+
+/* The pick: no chrome of its own — the row's fill and edge are its states. */
+[data-ui='next'] .nx-mask-zone-pick {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 0 var(--space-sm);
+  border: none;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--color-ink);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* The 44px hit target, drawn without changing the look: ::before stands one
+   grid step proud of the row above and below (the kit's technique). */
+[data-ui='next'] .nx-mask-zone-pick::before {
+  content: '';
+  position: absolute;
+  inset: calc(-1 * var(--space-2xs)) 0;
+}
+
+/* The focus ring, inset: an outset one would cross into the neighbouring row. */
+[data-ui='next'] .nx-mask-zone-pick:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: -2px;
+}
+
+[data-ui='next'] .nx-mask-zone-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A zone switched off is still a zone — still selectable, quieter. */
+[data-ui='next'] .nx-mask-zone-row-disabled .nx-mask-zone-name {
+  color: var(--color-muted);
+}
+
+/* ── The selected zone's settings ──────────────────────────────────── */
+/* The kit's field vocabulary, as the Privacy Masking panel uses it. The
+   label takes the rest of its row; the number fields fill their cells. */
+[data-ui='next'] .nx-mask-field {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+
+[data-ui='next'] .nx-mask-label-input {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+}
+
+/* "Fine-tune": a disclosure, collapsed by default — the picture is where a
+   zone is placed, the numbers are the second word. A quiet key whose
+   chevron turns over when it is open (the kit's disclosure motion). */
+[data-ui='next'] .nx-mask-finetune {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  min-height: var(--control-h);
+  margin-left: calc(-1 * var(--space-sm));
+  padding: 0 var(--space-sm);
+  border: none;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--color-ink-2);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    color var(--dur-micro) var(--ease-out),
+    background var(--dur-micro) var(--ease-out);
+}
+
+[data-ui='next'] .nx-mask-finetune:hover {
+  color: var(--color-ink);
+  background: var(--color-paper-3);
+}
+
+[data-ui='next'] .nx-mask-finetune svg {
+  color: var(--color-muted);
+}
+
+[data-ui='next'] .nx-mask-finetune-chevron {
+  display: flex;
+  transition: transform var(--dur-micro) var(--ease-out);
+}
+
+[data-ui='next'] .nx-mask-finetune-chevron-open {
+  transform: rotate(180deg);
+}
+
+/* X · Y / Width · Height: two stacked fields to a row. */
+[data-ui='next'] .nx-mask-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-sm) var(--space-md);
+}
+
+/* The kit's number input is 84px on a form row; here the cell decides. */
+[data-ui='next'] .nx-mask-percent {
+  width: 100%;
+}
+
+/* ── Below 1200px: a sheet under the stage ─────────────────────────── */
+/* At these widths the normal inspector is either a Drawer (768–1199) or
+   the band stacked under the stage (≤767). While an edit runs it is always
+   the latter: one sheet under the stage, so the zones are edited where the
+   picture is and never behind a slide-over. The stage keeps a usable
+   height — the picture is what is being drawn on — and the sheet scrolls
+   with it inside the row. */
+@media (max-width: 1199px) {
+  [data-ui='next'] .nx-mask-editing .nx-stage-row {
+    flex-direction: column;
+    overflow-y: auto;
+  }
+
+  [data-ui='next'] .nx-mask-editing .nx-stage {
+    min-height: min(56vh, 520px);
+  }
+
+  [data-ui='next'] .nx-mask-editing .nx-inspector {
+    display: flex;
+    width: 100%;
+    border-left: none;
+    border-top: 1px solid var(--color-rule);
+  }
+}
+
+/* ── Phone ─────────────────────────────────────────────────────────── */
+/* The bar tucks into the mobile well's own margins, and the keyboard line
+   goes: there is no keyboard to explain, and the words need the room. The
+   stage floor drops with the viewport (the mobile well keeps a shorter
+   floor too), and the sheet stays under it. */
+@media (max-width: 767px) {
+  [data-ui='next'] .nx-mask-bar {
+    margin: var(--space-sm) var(--space-sm) 0;
+  }
+
+  [data-ui='next'] .nx-mask-bar-keys {
+    display: none;
+  }
+
+  [data-ui='next'] .nx-mask-editing .nx-stage {
+    min-height: min(48vh, 400px);
+  }
+}

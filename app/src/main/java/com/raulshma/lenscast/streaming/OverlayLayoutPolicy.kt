@@ -47,6 +47,19 @@ object OverlayLayoutPolicy {
 
     private val reusableDate = Date()
 
+    /**
+     * Whether the MJPEG overlay/masking pass has pixel work for these
+     * settings: the text overlay is enabled, or masking is on with at least
+     * one enabled zone. FramePipeline gates its decode/re-encode pass on
+     * this rather than `overlay.enabled` alone — the renderer already skips
+     * a disabled overlay itself, so gating on `enabled` starved masking
+     * whenever the text overlay was off.
+     */
+    fun overlayPassNeeded(settings: OverlaySettings): Boolean {
+        if (settings.enabled) return true
+        return settings.maskingEnabled && settings.maskingZones.any { it.enabled }
+    }
+
     fun zoneToPixels(
         zone: MaskingZone,
         bitmapWidth: Int,

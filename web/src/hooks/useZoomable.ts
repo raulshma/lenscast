@@ -5,6 +5,12 @@ interface UseZoomableOptions {
   maxScale?: number
   initialScale?: number
   wheelZoomFactor?: number
+  /**
+   * False while the picture's gestures are locked — another surface owns
+   * the pointer (the masking-zone editor draws on the picture). Absent or
+   * true: the gestures run as they always have.
+   */
+  enabled?: () => boolean
 }
 
 interface UseZoomableReturn {
@@ -39,6 +45,19 @@ export function useZoomable(options: UseZoomableOptions = {}): UseZoomableReturn
   let initialPinchDistance = 0
   let initialPinchScale = 1
 
+  // The lock is read at event time and never tracked: the listeners stay
+  // attached exactly as they are, and a locked handler returns before any
+  // preventDefault, so wheel and touch scrolling run on as if the listeners
+  // were not there. A pan that was in flight when the lock fell is dropped
+  // on the first locked event — its mouseup / touchend is one of the events
+  // the lock now swallows, and a stale pan would follow the pointer again
+  // the next time the picture is zoomed.
+  function locked(): boolean {
+    if (options.enabled?.() !== false) return false
+    isPanning = false
+    return true
+  }
+
   function getContainerBounds() {
     if (!container) return { width: 0, height: 0 }
     return {
@@ -61,6 +80,7 @@ export function useZoomable(options: UseZoomableOptions = {}): UseZoomableReturn
   }
 
   function handleWheel(e: WheelEvent) {
+    if (locked()) return
     e.preventDefault()
     if (!container) return
 
@@ -96,6 +116,7 @@ export function useZoomable(options: UseZoomableOptions = {}): UseZoomableReturn
   }
 
   function handleTouchStart(e: TouchEvent) {
+    if (locked()) return
     if (e.touches.length === 2) {
       e.preventDefault()
       initialPinchDistance = getTouchDistance(e.touches)
@@ -110,6 +131,7 @@ export function useZoomable(options: UseZoomableOptions = {}): UseZoomableReturn
   }
 
   function handleTouchMove(e: TouchEvent) {
+    if (locked()) return
     if (e.touches.length === 2) {
       e.preventDefault()
       const currentDistance = getTouchDistance(e.touches)
@@ -141,6 +163,7 @@ export function useZoomable(options: UseZoomableOptions = {}): UseZoomableReturn
   }
 
   function handleTouchEnd(e: TouchEvent) {
+    if (locked()) return
     if (e.touches.length < 2) {
       initialPinchDistance = 0
     }
@@ -150,6 +173,7 @@ export function useZoomable(options: UseZoomableOptions = {}): UseZoomableReturn
   }
 
   function handleMouseDown(e: MouseEvent) {
+    if (locked()) return
     if (e.button === 0 && isZoomed()) {
       isPanning = true
       startX = e.clientX
@@ -161,6 +185,7 @@ export function useZoomable(options: UseZoomableOptions = {}): UseZoomableReturn
   }
 
   function handleMouseMove(e: MouseEvent) {
+    if (locked()) return
     if (isPanning) {
       const dx = e.clientX - startX
       const dy = e.clientY - startY
@@ -171,6 +196,7 @@ export function useZoomable(options: UseZoomableOptions = {}): UseZoomableReturn
   }
 
   function handleMouseUp() {
+    if (locked()) return
     isPanning = false
   }
 
@@ -181,6 +207,7 @@ export function useZoomable(options: UseZoomableOptions = {}): UseZoomableReturn
   }
 
   function handleDblClick(e: MouseEvent) {
+    if (locked()) return
     e.preventDefault()
     if (isZoomed()) {
       resetZoom()

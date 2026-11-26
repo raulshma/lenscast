@@ -41,6 +41,16 @@
   transition: none;
 }
 
+/* Restore .preview-img sizing over base.css's img/video { height: auto }:
+   the stage frame is a bounded box, so portrait, 4:3, and 16:9 pictures
+   scale to fit and letterbox via object-fit: contain rather than expanding
+   to 100% width and clipping top/bottom inside overflow: hidden. */
+[data-ui='next'] .preview-container .preview-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
 /* On air: the frame stays the frame — the REC chip carries the state. */
 [data-ui='next'] .preview-active {
   border-color: var(--color-rule);
@@ -838,6 +848,13 @@
 @media (max-width: 767px) {
   [data-ui='next'] .preview-section {
     padding: var(--space-sm);
+  }
+
+  /* With .preview-img height: 100% restored, the scrolling column layout
+     needs an explicit stage floor so the stage never collapses to 0px when
+     the inspector stacks below it. */
+  [data-ui='next'] .preview-container:not(.preview-container-fullscreen) {
+    min-height: min(45vh, 360px);
   }
 
   [data-ui='next'] .nx-cam-strip-group + .nx-cam-strip-group {

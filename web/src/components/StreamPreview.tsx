@@ -27,6 +27,9 @@ import { PttFallbackUplink, floatChunkToPcm16 } from '../lib/pttFallback'
 import { t } from '../lib/i18n'
 import type Hls from 'hls.js'
 
+/** A rung's own media element — the box a picture overlay maps onto. */
+export type PreviewMedia = HTMLImageElement | HTMLVideoElement | HTMLCanvasElement
+
 interface Props {
   status: () => DeviceStatus | null
   previewVisible: () => boolean
@@ -64,6 +67,19 @@ interface Props {
    * release the hidden element may never see. Absent or true = interactive.
    */
   interactionVisible?: () => boolean
+  /**
+   * A layer over the picture, as a slot (the masking-zone editor): it
+   * receives the accessor for the mounted media element of the rung on
+   * stage — the box zones are mapped onto — and renders as the container's
+   * last child, above its overlays. Absent: nothing is rendered.
+   */
+  pictureOverlay?: (media: () => PreviewMedia | undefined) => JSX.Element
+  /**
+   * True while the picture's gestures (wheel zoom, pinch, pan, double-click)
+   * are locked because another surface owns the pointer. A lock always
+   * starts from an unzoomed picture. Absent or false: gestures run as ever.
+   */
+  gesturesLocked?: () => boolean
 }
 
 // The talkback mic tap. AudioWorklet (the modern replacement for the
@@ -339,6 +355,30 @@ export default function StreamPreview(props: Props) {
   })
   onCleanup(() => teardownHls())
 
+  // ── The element on stage ──────────────────────────────────────────
+  // The MJPEG rung's <img> is the fourth media element; its ref exists for
+  // the memo below, the same way the other three rungs' refs exist for
+  // their players.
+  const [mjpegImg, setMjpegImg] = createSignal<HTMLImageElement | null>(null)
+  // The mounted media element of the rung on stage — what a picture overlay
+  // maps its zones onto. undefined while the stage shows the boot
+  // placeholder. The refs are plain setters that Solid does not clear on
+  // unmount, so the stage's own verdict — the condition the elements are
+  // rendered under — decides, never the ref alone. One limit: a rung that
+  // re-mounts reports its previous element for the instant before the new
+  // one's ref lands; that element has no box, and the overlay treats a
+  // boxless element as no picture.
+  const stageLive = () => props.previewVisible() && webActive() && !blockedByLock()
+  const activeMedia = createMemo<PreviewMedia | undefined>(() => {
+    if (!stageLive()) return undefined
+    switch (playerMode()) {
+      case 'whep': return whepVideo() ?? undefined
+      case 'h264': return h264Canvas() ?? undefined
+      case 'mjpeg': return mjpegImg() ?? undefined
+      case 'hls': return hlsVideo() ?? undefined
+    }
+  })
+
   // The push-to-talk hold lifecycle (lib/pttPhase: idle → arming → holding
   // → draining; pttHold below stays the async-liveness guard for in-flight
   // continuations — the phase is the UI/latch verdict). The derived memo
@@ -399,6 +439,12 @@ export default function StreamPreview(props: Props) {
     minScale: 1,
     maxScale: 10,
     wheelZoomFactor: 0.15,
+    enabled: () => !props.gesturesLocked?.(),
+  })
+  // A gesture lock always starts from an unzoomed picture: the surface that
+  // took the pointer maps its own coordinates onto the frame.
+  createEffect(() => {
+    if (props.gesturesLocked?.() && zoom.isZoomed()) zoom.resetZoom()
   })
 
   // ── Fullscreen preview + screen wake lock (issue #17) ──
@@ -623,6 +669,7 @@ export default function StreamPreview(props: Props) {
         {props.previewVisible() && webActive() && !blockedByLock() ? (
           <Show when={playerMode() !== 'mjpeg'} fallback={
           <img
+            ref={setMjpegImg}
             class="preview-img zoomable-content"
             src={`/stream?t=${props.streamNonce()}`}
             alt={t('preview.liveAlt')}
@@ -842,14 +889,24 @@ export default function StreamPreview(props: Props) {
             {props.stripOverlay?.()}
           </div>
         </Show>
+
+        {/* Picture overlay — the slot's layer rides above the stats
+            indicator, the strip and the focus ring, and below the fullscreen
+            exit and hint, so those stay reachable while it is up. */}
+        {props.pictureOverlay?.(activeMedia)}
       </div>
 
       {/* Action Bar */}
       <div class="preview-actions">
         <div class="preview-actions-left">
+          {/* The rung stands still while the picture's gestures are locked
+              (the masking-zone editor maps zones onto the MJPEG frame, which
+              the other rungs crop): the key that would cycle it is stopped
+              upstream, and this button stands down. */}
           <button
             class="action-btn action-btn-ghost"
             onClick={() => setPlayerMode(cyclePlayerMode(playerMode()))}
+            disabled={props.gesturesLocked?.() === true}
             title={`${t('preview.playerTitle', { mode: playerMode().toUpperCase(), next: cyclePlayerMode(playerMode()).toUpperCase() })}`}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

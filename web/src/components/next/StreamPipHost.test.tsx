@@ -5,6 +5,8 @@ import { createSignal } from 'solid-js'
 import StreamPipHost from './StreamPipHost'
 import { hashRouter } from '../../lib/router'
 import { registerStageSlot, resetPipStoreForTests } from '../../lib/pipStore'
+import { resetMaskEditStoreForTests, setMaskEditSession, startMaskEdit } from '../../lib/maskEditStore'
+import { createMaskEditSession, type MaskEditState } from './views/live/masking/maskEditSession'
 import type { NextState } from './NextState'
 import type { PlayerMode } from '../../video/playerLadder'
 
@@ -12,6 +14,9 @@ import type { PlayerMode } from '../../video/playerLadder'
 // re-parents between the registered stage slot, the mini-player dock and
 // the holding pen as the route and the stream state flip — and the dock
 // buttons hit exactly the actions they claim (stop, expand, dismiss-only).
+// The masking-zone edit rides the same host: its layer is the preview's
+// picture slot, and while it runs the strip stands down and the preview's
+// own gestures are locked.
 
 function fixtureState(opts: { streamOn?: boolean } = {}) {
   const [status, setStatus] = createSignal<unknown>(
@@ -59,6 +64,7 @@ describe('StreamPipHost', () => {
 
   beforeEach(() => {
     resetPipStoreForTests()
+    resetMaskEditStoreForTests()
     document.body.innerHTML = ''
     stage = document.createElement('div')
     document.body.appendChild(stage)
@@ -67,7 +73,10 @@ describe('StreamPipHost', () => {
     hashRouter().navigate({ name: 'media' })
   })
 
-  afterEach(() => cleanup())
+  afterEach(() => {
+    cleanup()
+    resetMaskEditStoreForTests()
+  })
 
   function host() {
     return document.querySelector('.nx-stream-host') as HTMLElement
@@ -162,5 +171,62 @@ describe('StreamPipHost', () => {
     fireEvent.click(document.querySelector('.nx-pip-tap') as HTMLElement)
     expect(window.location.hash).toBe('#/live')
     await waitFor(() => expect(host().parentElement).toBe(stage))
+  })
+
+  // ── The masking-zone edit ──
+  // What LiveView does when the store is armed: create the editor and
+  // publish it. The commit is injected so no save ever reaches a network.
+  function openEdit(state: NextState) {
+    const session = createMaskEditSession(state as unknown as MaskEditState, { focusZoneId: null, commit: async () => {} })
+    startMaskEdit()
+    setMaskEditSession(session)
+    return session
+  }
+
+  it('an edit hides the camera strip, mounts the zone layer as the container\'s last element, and locks the preview\'s gestures', async () => {
+    const { state } = fixtureState()
+    render(() => <StreamPipHost state={state} />)
+    hashRouter().navigate({ name: 'live' })
+    await waitFor(() => expect(host().parentElement).toBe(stage))
+    const box = host().querySelector('.preview-container') as HTMLElement
+    expect(document.querySelector('.cam-strip-host')).not.toBeNull()
+    expect(box.classList.contains('has-cam-strip')).toBe(true)
+    expect(document.querySelector('.nx-mask-layer')).toBeNull()
+
+    const session = openEdit(state)
+    await waitFor(() => expect(document.querySelector('.nx-mask-layer')).not.toBeNull())
+    // The strip is gone, and the container knows it.
+    expect(document.querySelector('.cam-strip-host')).toBeNull()
+    expect(box.classList.contains('has-cam-strip')).toBe(false)
+    // The layer is the container's last element, above the preview's own overlays.
+    expect(box.lastElementChild).toBe(document.querySelector('.nx-mask-layer'))
+    // The same elements stayed mounted: the edit re-skins the stage, it does not rebuild it.
+    expect(box.querySelector('img.preview-img')).not.toBeNull()
+    // The preview's gestures are locked: the wheel over the stage neither zooms nor is swallowed.
+    const event = new WheelEvent('wheel', { deltaY: -100, bubbles: true, cancelable: true })
+    box.dispatchEvent(event)
+    expect(event.defaultPrevented).toBe(false)
+    const transform = (box.querySelector('img.preview-img') as HTMLElement).style.transform
+    expect(transform).toMatch(/^scale\(1\) translate\(0px(?:, 0px)?\)$/)
+
+    // Done: the strip is back and the layer is gone, with nothing remounted.
+    const player = box.querySelector('img.preview-img')
+    session.finish()
+    await waitFor(() => expect(document.querySelector('.cam-strip-host')).not.toBeNull())
+    expect(box.classList.contains('has-cam-strip')).toBe(true)
+    expect(document.querySelector('.nx-mask-layer')).toBeNull()
+    expect(box.querySelector('img.preview-img')).toBe(player)
+  })
+
+  it('armed but unanswered, the edit leaves the stage exactly as it was', async () => {
+    const { state } = fixtureState()
+    render(() => <StreamPipHost state={state} />)
+    hashRouter().navigate({ name: 'live' })
+    await waitFor(() => expect(host().parentElement).toBe(stage))
+    startMaskEdit()
+    // No session yet (LiveView has not answered): nothing is drawn — but the
+    // stage already stands aside for it, the moment the edit is armed.
+    await waitFor(() => expect(document.querySelector('.cam-strip-host')).toBeNull())
+    expect(document.querySelector('.nx-mask-layer')).toBeNull()
   })
 })

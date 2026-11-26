@@ -15,6 +15,8 @@ import EffectsPanel from './system/cards/EffectsPanel'
 import NightVisionPanel from './system/cards/NightVisionPanel'
 import OverlayPanel from './system/cards/OverlayPanel'
 import PrivacyMaskingPanel from './system/cards/PrivacyMaskingPanel'
+// The one predicate Privacy Masking's way into the visual editor gates on.
+import { webStreamActive } from './live/masking/webStreamActive'
 // Capture tab
 import IntervalCapturePanel from './system/cards/IntervalCapturePanel'
 import RecordingPanel from './system/cards/RecordingPanel'
@@ -191,6 +193,7 @@ export default function SystemView(props: { state: NextState }) {
                 <PrivacyMaskingPanel
                   streaming={() => state.settings()!.streaming}
                   onUpdate={state.updateStreamingDebounced}
+                  streamActive={() => webStreamActive(state)}
                 />
               </Rack>
             </Show>

@@ -50,6 +50,23 @@ export function WebStreamCard(props: StreamingCardProps) {
         onChange={() => props.updateStreamingAndSave({ webStreamingEnabled: !webStreamingEnabled() })}
       />
 
+      {/* Shared stream tier across Web (MJPEG, WHEP, HLS, WS), RTSP, WHIP,
+          and RTMP — keep accessible even when RTSP or Web Stream is off. */}
+      <FieldRow label={t('webstream.resolution')} hint={t('webstream.resolutionHint')}>
+        <Select
+          value={s()?.streaming?.rtspResolution ?? API_DEFAULTS.rtspResolution}
+          options={[
+            { value: '480p', label: '480p (4:3)' },
+            { value: '720p', label: '720p' },
+            { value: '720p43', label: '720p (4:3)' },
+            { value: '1080p', label: '1080p' },
+            { value: '1080p43', label: '1080p (4:3)' },
+          ]}
+          onChange={(v) => props.updateStreamingAndSave({ rtspResolution: v as RtspResolution })}
+          ariaLabel={t('webstream.resolution')}
+        />
+      </FieldRow>
+
       <SliderField
         label={t('webstream.jpegQuality')}
         display={`${s()?.streaming?.jpegQuality ?? API_DEFAULTS.jpegQuality}%`}
@@ -260,23 +277,6 @@ export function RtspCard(props: StreamingCardProps) {
             ]}
             onChange={(v) => props.updateStreamingAndSave({ rtspInputFormat: v as RtspInputFormat })}
             ariaLabel={t('rtsp.inputFormat')}
-          />
-        </FieldRow>
-
-        {/* Resolution applies with an RTSP restart — the running pipeline
-            keeps streaming at the previous size until it is restarted. */}
-        <FieldRow label={t('common.resolution')} hint={t('rtsp.restartHint')}>
-          <Select
-            value={s()?.streaming?.rtspResolution ?? API_DEFAULTS.rtspResolution}
-            options={[
-              { value: '480p', label: '480p (4:3)' },
-              { value: '720p', label: '720p' },
-              { value: '720p43', label: '720p (4:3)' },
-              { value: '1080p', label: '1080p' },
-              { value: '1080p43', label: '1080p (4:3)' },
-            ]}
-            onChange={(v) => props.updateStreamingAndSave({ rtspResolution: v as RtspResolution })}
-            ariaLabel={t('common.resolution')}
           />
         </FieldRow>
 

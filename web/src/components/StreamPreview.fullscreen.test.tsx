@@ -19,7 +19,15 @@ import type { PlayerMode } from '../video/playerLadder'
 // target element), window.isSecureContext (a prototype getter — shadowed with
 // an own property), and navigator.wakeLock resolving a fake sentinel.
 
-function renderPreview(opts: { live?: boolean; mode?: PlayerMode; stats?: Record<string, unknown> } = {}) {
+function renderPreview(
+  opts: {
+    live?: boolean
+    mode?: PlayerMode
+    stats?: Record<string, unknown>
+    /** The opt-in props (pictureOverlay, gesturesLocked, stripOverlay) a slot test passes. */
+    extra?: Record<string, unknown>
+  } = {},
+) {
   const [playerMode, setPlayerMode] = createSignal<PlayerMode>(opts.mode ?? 'mjpeg')
   const [live, setLive] = createSignal(opts.live ?? false)
   // The payload is a signal too: a test can change what the device reports
@@ -43,6 +51,7 @@ function renderPreview(opts: { live?: boolean; mode?: PlayerMode; stats?: Record
     handleStopRtspStream: () => {},
     setPreviewVisible: () => {},
     connectionLost: () => false,
+    ...opts.extra,
   }
   const utils = render(() => <StreamPreview {...props} />)
   return { ...utils, setLive, setStats, setPlayerMode }
@@ -388,5 +397,123 @@ describe('Stream stats overlay', () => {
     clickStats() // off → auto
     expect(screen.getByText('Stats: AUTO')).toBeTruthy()
     expect(badge()).toBeNull()
+  })
+})
+
+// The picture overlay slot and the gesture lock (the masking-zone editor's
+// stage plumbing): both are opt-in props, and with them absent the preview
+// is exactly what it was.
+describe('Picture overlay slot and gesture lock', () => {
+  it('the slot renders as the container\'s last element, after the strip, and on the MJPEG rung media() is the MJPEG img', () => {
+    let media: (() => unknown) | null = null
+    renderPreview({
+      live: true,
+      extra: {
+        stripOverlay: () => <div data-testid="strip" />,
+        pictureOverlay: (accessor: () => unknown) => {
+          media = accessor
+          return <div data-testid="picture-layer" />
+        },
+      },
+    })
+    const box = container()
+    const layer = screen.getByTestId('picture-layer')
+    expect(layer.parentElement).toBe(box)
+    expect(box.lastElementChild).toBe(layer)
+    expect(box.querySelector('.cam-strip-host')).not.toBeNull()
+    // Strip host, then the layer: the slot is stacked above the strip.
+    expect(box.querySelector('.cam-strip-host')!.nextElementSibling).toBe(layer)
+    expect(media!()).toBe(box.querySelector('img.preview-img'))
+  })
+
+  it('media() is undefined while the stage shows the placeholder — never a stale element', () => {
+    let media: (() => unknown) | null = null
+    const { setLive } = renderPreview({
+      live: true,
+      extra: {
+        pictureOverlay: (accessor: () => unknown) => {
+          media = accessor
+          return <div data-testid="picture-layer" />
+        },
+      },
+    })
+    const first = container().querySelector('img.preview-img')
+    expect(media!()).toBe(first)
+    // The stream stops: the stage swaps to its placeholder.
+    setLive(false)
+    expect(document.querySelector('img.preview-img')).toBeNull()
+    expect(media!()).toBeUndefined()
+    // Back on air: the rung's new element.
+    setLive(true)
+    expect(media!()).toBe(container().querySelector('img.preview-img'))
+    expect(media!()).not.toBe(first)
+  })
+
+  it('without the slot the container ends where it always did', () => {
+    renderPreview({ live: true, extra: { stripOverlay: () => <div data-testid="strip" /> } })
+    expect(container().lastElementChild).toBe(container().querySelector('.cam-strip-host'))
+  })
+
+  it('a gesture lock starts from an unzoomed picture and keeps the wheel inert until it lifts', () => {
+    const [locked, setLocked] = createSignal(false)
+    renderPreview({ live: true, extra: { gesturesLocked: locked } })
+    const box = container()
+    const transform = () => (box.querySelector('img.preview-img') as HTMLElement).style.transform
+    // Unzoomed and unpanned (jsdom serialises a zero translate as one length).
+    const atRest = /^scale\(1\) translate\(0px(?:, 0px)?\)$/
+    expect(transform()).toMatch(atRest)
+
+    // Unlocked: the wheel zooms, as ever.
+    fireEvent.wheel(box, { deltaY: -100 })
+    expect(transform()).toContain('scale(1.15)')
+
+    // The lock falls: the picture is back at scale 1 without a gesture.
+    setLocked(true)
+    expect(transform()).toMatch(atRest)
+    const event = new WheelEvent('wheel', { deltaY: -100, bubbles: true, cancelable: true })
+    box.dispatchEvent(event)
+    expect(event.defaultPrevented).toBe(false)
+    expect(transform()).toMatch(atRest)
+
+    // The lock lifts: the wheel zooms again.
+    setLocked(false)
+    fireEvent.wheel(box, { deltaY: -100 })
+    expect(transform()).toContain('scale(1.15)')
+  })
+
+  // The rung must hold still under a lock: the masking-zone editor maps its
+  // zones onto the MJPEG frame, which the other rungs crop — so the button
+  // that would move the picture under them stands down with the gestures.
+  const cycleButton = () => screen.getByTitle(/^Preview player: /).closest('button') as HTMLButtonElement
+
+  it('a gesture lock stands the player-cycle button down, and it recovers when the lock lifts', () => {
+    const [locked, setLocked] = createSignal(false)
+    renderPreview({ live: true, extra: { gesturesLocked: locked } })
+    expect(cycleButton().disabled).toBe(false)
+
+    // Locked: disabled — and a click cannot move the rung (Solid's own
+    // delegation skips a disabled control, as a browser does).
+    setLocked(true)
+    expect(cycleButton().disabled).toBe(true)
+    fireEvent.click(cycleButton())
+    expect(screen.getByText('Preview: MJPEG')).toBeTruthy()
+    expect(document.querySelector('img.preview-img')).not.toBeNull()
+
+    // The lock lifts: the button is back, and works.
+    setLocked(false)
+    expect(cycleButton().disabled).toBe(false)
+    fireEvent.click(cycleButton())
+    expect(screen.queryByText('Preview: MJPEG')).toBeNull()
+    expect(document.querySelector('img.preview-img')).toBeNull()
+  })
+
+  it('without the lock the player-cycle button is exactly what it was', () => {
+    renderPreview({ live: true })
+    const button = cycleButton()
+    expect(button.disabled).toBe(false)
+    expect(button.hasAttribute('disabled')).toBe(false)
+    expect(button.getAttribute('title')).toBe('Preview player: MJPEG · click to switch to HLS')
+    fireEvent.click(button)
+    expect(screen.queryByText('Preview: MJPEG')).toBeNull()
   })
 })

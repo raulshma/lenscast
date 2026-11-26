@@ -180,6 +180,33 @@
   color: var(--color-muted);
 }
 
+/* Privacy Masking — the zone list. One zone per row, and the row's open key
+   is the kit's own button stretched over the zone's name and type. It sets
+   neither a height nor a hit of its own, so it keeps the kit's: a 36px box
+   whose ::before reaches 44px (DESIGN.md's floor). The disclosure and the ×
+   beside it are that button's siblings: a press on either is its own, never
+   the row's. Quiet at rest, like the row's text; the well answers the hand. */
+[data-ui='next'] .nx-privacy-zone-open {
+  flex: 1;
+  min-width: 0;
+  justify-content: flex-start;
+  gap: var(--space-sm);
+  padding: 0 var(--space-sm);
+}
+
+[data-ui='next'] .nx-privacy-zone-open:hover:not(:disabled) {
+  background: var(--color-paper-3);
+}
+
+/* A long label yields inside the key instead of pushing the × off the row. */
+[data-ui='next'] .nx-privacy-zone-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ══════════════════════════════════════════════════════════════════
    MULTI-CAM — camera frames on the well
    Tiles sit on the paper-3 well with a hairline; the live tile wears

@@ -6,7 +6,9 @@ import { t } from '../../lib/i18n'
 import { Led } from './ui'
 import { IconClose, IconExpand, IconStop } from '../icons'
 import CameraStrip from './views/live/CameraStrip'
+import MaskEditLayer from './views/live/masking/MaskEditLayer'
 import StreamPreview from '../StreamPreview'
+import { maskEditActive } from '../../lib/maskEditStore'
 import {
   PIP_MOBILE_BOTTOM_INSET,
   PIP_MOBILE_BREAKPOINT,
@@ -233,12 +235,19 @@ export default function StreamPipHost(props: { state: NextState }) {
       </div>
 
       {/* The persistent player: view switches move this container, they
-          never unmount it. */}
+          never unmount it. While masking zones are edited (maskEditStore:
+          armed from wherever the entry point sits, answered by LiveView)
+          the zone layer owns the picture: it rides the pictureOverlay slot,
+          the preview's own gestures are locked, and the camera strip —
+          which sits on the same bottom edge and the same pointer — stands
+          down (an absent slot is how the strip is hidden). */}
       <div class="nx-stream-host" ref={setHostEl}>
         <StreamPreview
           {...streamPreviewProps(state)}
           interactionVisible={interactionVisible}
-          stripOverlay={() => <CameraStrip state={state} />}
+          stripOverlay={maskEditActive() ? undefined : () => <CameraStrip state={state} />}
+          gesturesLocked={maskEditActive}
+          pictureOverlay={(media) => <MaskEditLayer state={state} media={media} />}
         />
       </div>
     </>

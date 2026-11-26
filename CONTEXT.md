@@ -912,6 +912,28 @@ for a simply-missing wake-lock API. The hook lifts the active bit to App
 Escape while fullscreen; the in-container exit button and hint ride inside the
 container because the action bar is invisible in native fullscreen.
 
+### Masking Zone Editor
+**`web/src/lib/maskingZonePolicy.ts`** — the beta web UI's draw-to-edit mode
+for privacy masking zones: an editing state on the Live stage (next UI only;
+the classic `PrivacyMaskingCard.tsx` keeps its percent sliders). While it
+runs, the stage's persistent `StreamPreview` is switched to the MJPEG feed —
+the exact frame the device paints masks on — and a zone layer maps gestures
+onto the picture with a contain-fit rect computed from the media element's
+own box, so coordinates are normalized to the PICTURE, never the letterboxed
+container. The split: `maskingZonePolicy.ts` is the pure geometry (frame
+rule, drag/resize/move verdicts, vitest-pinned), `web/src/lib/
+maskEditStore.ts` is the module-level "an edit is running" shared state
+(arm-then-own: entry points arm, the Live view mounts the session),
+`web/src/components/next/views/live/masking/maskEditSession.ts` is the
+controller factory (signals, targeted `saveStreamingPatch` per gesture end
+— one in flight, latest wins — and the debounced publish on "Done"), and
+the components there (`MaskEditLayer`, `MaskEditBar`, `MaskZoneInspector`,
+`MaskingQuickPanel`) are the picture and chrome skins. The draft lives
+locally so the settings poll cannot clobber it; a failed save toasts and
+the next commit retries. Zones paint only on the MJPEG web stream — RTSP,
+HLS, WHEP, recordings and captures stay unmasked — and manual percent
+entry survives as a collapsed fine-tune row in the inspector.
+
 ### Gallery Page
 **`streaming/web/GalleryPage.kt`** — the pure `/api/gallery` pagination:
 `of(items, type, page, pageSize)` returns items, filtered total, and the
@@ -984,7 +1006,11 @@ and the processed/dropped counters. StreamingManager gates activity and feeds
 behind `push()` without dragging in lifecycle. The accept/reject tick itself
 is the shared `FrameThrottle`, and the fps→interval derivation is
 `streaming/FrameTiming` (`effectiveFps` falls back to
-`StreamDefaults.STREAM_FPS`) — one home each for the web and RTSP push paths.
+`StreamDefaults.STREAM_FPS`) — one home each for the web and RTSP push
+paths. The overlay/masking pass is gated by
+`OverlayLayoutPolicy.overlayPassNeeded` — text overlay on, or masking with
+at least one enabled zone — not by the text overlay's `enabled` flag alone,
+so privacy-only masks still burn in with the clock/name box switched off.
 
 ### RTSP Server
 **`streaming/rtsp/RtspServer.kt`** — the RTSP output. Its interface is
