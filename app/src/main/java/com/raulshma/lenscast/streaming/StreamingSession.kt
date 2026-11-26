@@ -86,6 +86,8 @@ class StreamingSession(
     // choreography BEFORE lifecycle (the ladder's end()/begin() and the HARD
     // tier take lifecycleMutex inside), so no ordering cycle exists.
     private val choreographyMutex = Mutex()
+    @Volatile
+    private var softRestartInProgress = false
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var optimizationJob: Job? = null
     private var cameraStateJob: Job? = null
@@ -102,11 +104,19 @@ class StreamingSession(
     suspend fun begin() {
         lifecycleMutex.withLock {
             if (active.get()) {
-                // A second output started late (startBoth starts web, begins,
-                // then starts RTSP and begins again): re-assert the foreground
-                // service type so a newly audio-carrying output is never
-                // captured without the MICROPHONE type.
-                sendForegroundIntent(StreamingService.ACTION_START)
+                // A second output started late (or re-armed during a soft
+                // restart): re-assert the foreground service type so a newly
+                // audio-carrying output gets MICROPHONE. Tolerate background
+                // FGS-start denial because the FGS itself is already live.
+                try {
+                    sendForegroundIntent(StreamingService.ACTION_START)
+                } catch (e: Exception) {
+                    if (isBackgroundStartRestriction(e)) {
+                        Log.w(TAG, "Streaming FGS re-assert skipped in background: ${e.javaClass.simpleName}")
+                    } else {
+                        throw e
+                    }
+                }
                 Log.d(TAG, "Streaming session foreground type re-asserted for late output start")
                 return
             }
@@ -126,8 +136,19 @@ class StreamingSession(
                 keepAliveAcquired = true
                 startOptimizationPolling()
                 startCameraStateWatch()
-                sendForegroundIntent(StreamingService.ACTION_START)
-                foregroundStarted = true
+                try {
+                    sendForegroundIntent(StreamingService.ACTION_START)
+                    foregroundStarted = true
+                } catch (e: Exception) {
+                    if (isBackgroundStartRestriction(e)) {
+                        // Background/locked start denied FGS promotion: keep
+                        // server-only standing if alive and heal on resume.
+                        Log.w(TAG, "Streaming FGS start denied in background; keeping session active", e)
+                        ensureServerForegroundLocked()
+                    } else {
+                        throw e
+                    }
+                }
                 streamWatchdog.startMonitoring()
                 Log.d(TAG, "Streaming session begun")
             } catch (e: Exception) {
@@ -221,7 +242,7 @@ class StreamingSession(
      */
     fun stopServerForegroundIfIdle() {
         synchronized(foregroundModeLock) {
-            if (active.get()) return
+            if (active.get() || softRestartInProgress) return
             stopForegroundServiceLocked()
         }
     }
@@ -304,8 +325,15 @@ class StreamingSession(
         return when (tier) {
             WatchdogPolicy.RecoveryTier.SOFT -> {
                 Log.d(TAG, "Soft recovery: rebinding CameraX use cases")
-                rebindCamera().also { bound ->
-                    if (!bound) Log.w(TAG, "Soft recovery: camera rebind failed (timed out or denied)")
+                var bound = rebindCamera()
+                if (!bound && cameraService.hasMissingSelectedLens()) {
+                    Log.w(TAG, "Soft recovery: selected lens missing; recovering provider and retrying bind")
+                    if (cameraService.recoverProviderAndReenumerate()) {
+                        bound = rebindCamera()
+                    }
+                }
+                bound.also {
+                    if (!it) Log.w(TAG, "Soft recovery: camera rebind failed (timed out or denied)")
                 }
             }
 
@@ -363,7 +391,20 @@ class StreamingSession(
      * backoff.
      */
     suspend fun <T> runChoreographed(block: suspend () -> T): T =
-        choreographyMutex.withLock { block() }
+        choreographyMutex.withLock {
+            softRestartInProgress = true
+            try {
+                block()
+            } finally {
+                softRestartInProgress = false
+            }
+        }
+
+    private fun isBackgroundStartRestriction(error: Exception): Boolean {
+        if (error is SecurityException) return true
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            error is android.app.ForegroundServiceStartNotAllowedException
+    }
 
     /**
      * The session-attached state a recovery disturbed: battery state, thermal

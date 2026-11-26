@@ -170,6 +170,14 @@ class WebAuthGate(
     private data class AuthAttempt(var count: Int, var blockedUntil: Long)
     private val authAttempts = ConcurrentHashMap<String, AuthAttempt>()
     private val authAttemptsLock = Any()
+    private val verifiedBasicCache: MutableMap<String, SessionRole> =
+        java.util.Collections.synchronizedMap(
+            object : LinkedHashMap<String, SessionRole>(16, 0.75f, true) {
+                override fun removeEldestEntry(
+                    eldest: MutableMap.MutableEntry<String, SessionRole>?,
+                ): Boolean = size > VERIFIED_BASIC_CACHE_SIZE
+            },
+        )
     private var lastSessionCleanupMillis = 0L
 
     val isEnabled: Boolean
@@ -182,6 +190,7 @@ class WebAuthGate(
      */
     fun setCredentials(username: String?, passwordHash: String?) {
         admin = normalize(username, passwordHash)
+        verifiedBasicCache.clear()
     }
 
     /**
@@ -191,6 +200,7 @@ class WebAuthGate(
      */
     fun setViewerCredentials(username: String?, passwordHash: String?) {
         viewer = normalize(username, passwordHash)
+        verifiedBasicCache.clear()
     }
 
     /** The blanking convention: a null-or-blank half makes the whole pair null. */
@@ -236,23 +246,20 @@ class WebAuthGate(
         val storedViewer = viewer
 
         val now = clock()
-        val matchedRole: SessionRole = synchronized(authAttemptsLock) {
+        val attemptKey = clientIp ?: "unknown"
+        synchronized(authAttemptsLock) {
             cleanupExpiredAuthAttempts(now)
-            val attempt = authAttempts.getOrPut(clientIp ?: "unknown") { AuthAttempt(0, 0L) }
+            val attempt = authAttempts.getOrPut(attemptKey) { AuthAttempt(0, 0L) }
             if (attempt.blockedUntil > now) return rateLimited()
             if (attempt.count >= MAX_AUTH_ATTEMPTS) {
                 attempt.blockedUntil = now + AUTH_LOCKOUT_MS
                 attempt.count = 0
                 return rateLimited()
             }
-            val matched = when {
-                StreamAuthCrypto.constantTimeEquals(username, storedAdmin.username) &&
-                    StreamAuthCrypto.verifyPassword(password, storedAdmin.passwordHash) -> SessionRole.ADMIN
-                storedViewer != null &&
-                    StreamAuthCrypto.constantTimeEquals(username, storedViewer.username) &&
-                    StreamAuthCrypto.verifyPassword(password, storedViewer.passwordHash) -> SessionRole.VIEWER
-                else -> null
-            }
+        }
+        val matched = matchCredentials(username, password, storedAdmin, storedViewer)
+        val matchedRole: SessionRole = synchronized(authAttemptsLock) {
+            val attempt = authAttempts.getOrPut(attemptKey) { AuthAttempt(0, 0L) }
             if (matched == null) {
                 attempt.count++
                 return invalidCredentials()
@@ -278,26 +285,63 @@ class WebAuthGate(
         if (storedAdmin == null) return SessionRole.ADMIN
         val storedViewer = viewer
         val now = clock()
-        return synchronized(authAttemptsLock) {
+        val attemptKey = "basic:" + username
+        synchronized(authAttemptsLock) {
             cleanupExpiredAuthAttempts(now)
-            val attempt = authAttempts.getOrPut("basic:" + username) { AuthAttempt(0, 0L) }
-            if (attempt.blockedUntil > now) return@synchronized null
+            val attempt = authAttempts.getOrPut(attemptKey) { AuthAttempt(0, 0L) }
+            if (attempt.blockedUntil > now) return null
             if (attempt.count >= MAX_AUTH_ATTEMPTS) {
                 attempt.blockedUntil = now + AUTH_LOCKOUT_MS
                 attempt.count = 0
-                return@synchronized null
+                return null
             }
-            val matched = when {
-                StreamAuthCrypto.constantTimeEquals(username, storedAdmin.username) &&
-                    StreamAuthCrypto.verifyPassword(password, storedAdmin.passwordHash) -> SessionRole.ADMIN
-                storedViewer != null &&
-                    StreamAuthCrypto.constantTimeEquals(username, storedViewer.username) &&
-                    StreamAuthCrypto.verifyPassword(password, storedViewer.passwordHash) -> SessionRole.VIEWER
-                else -> null
-            }
-            if (matched == null) attempt.count++ else attempt.count = 0
-            matched
         }
+        val cacheKey = basicCacheKey(storedAdmin, storedViewer, username, password)
+        verifiedBasicCache[cacheKey]?.let { cachedRole ->
+            synchronized(authAttemptsLock) {
+                authAttempts[attemptKey]?.count = 0
+            }
+            return cachedRole
+        }
+        // Run PBKDF2 password verification OUTSIDE authAttemptsLock so
+        // concurrent HTTP workers never serialize behind one 120k-iteration
+        // derivation under heavy CPU load.
+        val matched = matchCredentials(username, password, storedAdmin, storedViewer)
+        synchronized(authAttemptsLock) {
+            val attempt = authAttempts.getOrPut(attemptKey) { AuthAttempt(0, 0L) }
+            if (matched == null) {
+                attempt.count++
+            } else {
+                attempt.count = 0
+                verifiedBasicCache[cacheKey] = matched
+            }
+        }
+        return matched
+    }
+
+    private fun matchCredentials(
+        username: String,
+        password: String,
+        storedAdmin: Credentials,
+        storedViewer: Credentials?,
+    ): SessionRole? = when {
+        StreamAuthCrypto.constantTimeEquals(username, storedAdmin.username) &&
+            StreamAuthCrypto.verifyPassword(password, storedAdmin.passwordHash) -> SessionRole.ADMIN
+        storedViewer != null &&
+            StreamAuthCrypto.constantTimeEquals(username, storedViewer.username) &&
+            StreamAuthCrypto.verifyPassword(password, storedViewer.passwordHash) -> SessionRole.VIEWER
+        else -> null
+    }
+
+    private fun basicCacheKey(
+        storedAdmin: Credentials,
+        storedViewer: Credentials?,
+        username: String,
+        password: String,
+    ): String {
+        val inputDigest = StreamAuthCrypto.sha256Hex("$username\u0000$password")
+        return "${storedAdmin.username}\u0000${storedAdmin.passwordHash}\u0000" +
+            "${storedViewer?.username.orEmpty()}\u0000${storedViewer?.passwordHash.orEmpty()}\u0000$inputDigest"
     }
 
     /** The failed-login results: the message is derived from the typed reason. */
@@ -477,6 +521,7 @@ class WebAuthGate(
         private const val MAX_AUTH_ATTEMPTS = 10
         private const val AUTH_LOCKOUT_MS = 60 * 1000L
         private const val MAX_AUTH_ATTEMPTS_TRACKED = 500
+        private const val VERIFIED_BASIC_CACHE_SIZE = 8
 
         /**
          * Paths the API token can never touch: credential/session control, and

@@ -305,11 +305,12 @@
     <string name="option_golden_ratio">Golden ratio</string>
     <string name="option_s3">3 s</string>
     <string name="option_s10">10 s</string>
-    <string name="option_face_detection">Face detection</string>
+    <string name="option_face_priority">Face priority</string>
     <string name="option_night">Night</string>
     <string name="option_hdr">HDR</string>
     <string name="option_sunset">Sunset</string>
     <string name="option_fireworks">Fireworks</string>
+    <string name="option_steady_photo">Steady photo</string>
 
     <!-- ── App settings screen ── -->
     <string name="settings_app_title">App Settings</string>
@@ -330,6 +331,7 @@
     <string name="settings_retry">Retry</string>
     <string name="settings_section_display">Display</string>
     <string name="settings_show_preview">Show Camera Preview</string>
+    <string name="settings_show_preview_local_note">Applies to the preview shown on this device</string>
     <string name="settings_dynamic_color">Dynamic Color</string>
     <string name="settings_dynamic_color_description">Apply wallpaper colors to the app theme</string>
     <string name="settings_section_streaming">Streaming</string>

@@ -182,6 +182,30 @@ class CameraControlPlanTest {
         )
         assertEquals(CaptureRequest.CONTROL_SCENE_MODE_SPORTS, sports.sceneMode)
         assertEquals(CaptureRequest.CONTROL_MODE_USE_SCENE_MODE, sports.controlMode)
+
+        val namedNight = CameraControlPlan.from(
+            CameraSettings(sceneMode = "NIGHT"),
+            isoRange,
+            exposureRange,
+        )
+        assertEquals(CaptureRequest.CONTROL_SCENE_MODE_NIGHT, namedNight.sceneMode)
+        assertEquals(CaptureRequest.CONTROL_MODE_USE_SCENE_MODE, namedNight.controlMode)
+
+        val namedFace = CameraControlPlan.from(
+            CameraSettings(sceneMode = "FACE_PRIORITY"),
+            isoRange,
+            exposureRange,
+        )
+        assertEquals(CaptureRequest.CONTROL_SCENE_MODE_FACE_PRIORITY, namedFace.sceneMode)
+        assertEquals(CaptureRequest.CONTROL_MODE_AUTO, namedFace.controlMode)
+
+        val legacyFace = CameraControlPlan.from(
+            CameraSettings(sceneMode = "FACE_DETECTION"),
+            isoRange,
+            exposureRange,
+        )
+        assertEquals(CaptureRequest.CONTROL_SCENE_MODE_FACE_PRIORITY, legacyFace.sceneMode)
+        assertEquals(CaptureRequest.CONTROL_MODE_AUTO, legacyFace.controlMode)
     }
 
     @Test

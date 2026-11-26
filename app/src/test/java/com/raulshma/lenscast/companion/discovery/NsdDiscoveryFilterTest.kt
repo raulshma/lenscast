@@ -103,4 +103,11 @@ class NsdDiscoveryFilterTest {
         assertEquals("", NsdDiscoveryFilter.friendlyName(""))
         assertEquals("", NsdDiscoveryFilter.friendlyName("   "))
     }
+
+    @Test
+    fun `prioritized candidate hint recognizes LensCast service names case-insensitively`() {
+        assertTrue(NsdDiscoveryFilter.isPrioritizedCandidate("LensCast-Nokia-6-1-Plus"))
+        assertTrue(NsdDiscoveryFilter.isPrioritizedCandidate("lenscast-pixel8._http._tcp."))
+        assertFalse(NsdDiscoveryFilter.isPrioritizedCandidate("Brother HL-L2395DW"))
+    }
 }

@@ -35,6 +35,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -491,7 +492,10 @@ class RemoteSettingsSource(
      * and so a fresh config read re-emits without an extra channel.
      */
     override val authSettings: StateFlow<StreamAuthSettings> =
-        merge(doc, _auth).map { _auth.value }.stateIn(scope, WhileSubscribed, _auth.value)
+        merge(doc, _auth)
+            .onStart { emit(_auth.value) }
+            .map { _auth.value }
+            .stateIn(scope, WhileSubscribed, _auth.value)
 
     // ── Viewer-local lanes (the injected local store — never the document) ──
 

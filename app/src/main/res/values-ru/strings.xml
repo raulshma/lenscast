@@ -318,11 +318,12 @@
     <string name="option_golden_ratio">Золотое сечение</string>
     <string name="option_s3">3 с</string>
     <string name="option_s10">10 с</string>
-    <string name="option_face_detection">Распознавание лиц</string>
+    <string name="option_face_priority">Приоритет лиц</string>
     <string name="option_night">Ночь</string>
     <string name="option_hdr">HDR</string>
     <string name="option_sunset">Закат</string>
     <string name="option_fireworks">Фейерверк</string>
+    <string name="option_steady_photo">Стабильное фото</string>
 
     <!-- ── Экран настроек приложения ── -->
     <string name="settings_app_title">Настройки приложения</string>
@@ -343,6 +344,7 @@
     <string name="settings_retry">Повторить</string>
     <string name="settings_section_display">Экран</string>
     <string name="settings_show_preview">Показывать предпросмотр камеры</string>
+    <string name="settings_show_preview_local_note">Относится к предпросмотру на этом устройстве</string>
     <string name="settings_dynamic_color">Динамический цвет</string>
     <string name="settings_dynamic_color_description">Применять цвета обоев к теме приложения</string>
     <string name="settings_section_streaming">Трансляция</string>

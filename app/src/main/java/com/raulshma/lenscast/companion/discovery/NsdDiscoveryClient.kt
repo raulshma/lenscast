@@ -3,6 +3,8 @@ package com.raulshma.lenscast.companion.discovery
 import android.content.Context
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
+import android.net.wifi.WifiManager
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -11,6 +13,10 @@ import com.raulshma.lenscast.streaming.ServiceDiscoveryManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.net.Inet4Address
+import java.net.InetAddress
+import java.util.ArrayDeque
+import java.util.concurrent.Executor
 
 /**
  * The pairing sheet's LAN radar: NsdManager discovery over `_http._tcp`,
@@ -60,13 +66,27 @@ class NsdDiscoveryClient(private val context: Context) {
     /** Discovered LensCast devices keyed by `host:port` — the dedupe seam. */
     private val byHostPort = LinkedHashMap<String, DiscoveredService>()
 
+    /** Serialized resolve queue on API < 34 where NsdManager allows one resolve at a time. */
+    private val resolveQueue = ArrayDeque<NsdServiceInfo>()
+    private var resolveInFlight = false
+    private var scanEpoch = 0L
+
+    /** Active API 34+ ServiceInfoCallbacks keyed by friendly service name so stop() tears them down. */
+    private val serviceInfoCallbacks = LinkedHashMap<String, NsdManager.ServiceInfoCallback>()
+    private val mainExecutor = Executor { runnable -> mainHandler.post(runnable) }
+
+    @Volatile
+    private var multicastLock: WifiManager.MulticastLock? = null
+
     /** Starts (or restarts) the NSD scan. */
     fun start() {
         synchronized(lock) {
             // Restart semantics: a live cycle is torn down first so the
             // sheet's re-entry forces a fresh scan (and a double-start can
             // never register two listeners against one manager).
-            stopDiscovery()
+            stopDiscoveryLocked()
+            val epoch = ++scanEpoch
+            acquireMulticastLock()
             val listener = object : NsdManager.DiscoveryListener {
                 override fun onDiscoveryStarted(serviceType: String) {
                     Log.d(TAG, "NSD discovery started: $serviceType")
@@ -79,20 +99,25 @@ class NsdDiscoveryClient(private val context: Context) {
                 }
 
                 override fun onServiceFound(info: NsdServiceInfo) {
-                    val txt = txtRecords(info)
-                    if (!NsdDiscoveryFilter.isLensCastService(info.serviceName, txt)) return
-                    // Marshaled to the main looper: the resolve (and the
-                    // state writes it triggers) always run on one thread.
-                    mainHandler.post { resolve(info) }
+                    // Android NsdManager delivers empty TXT attributes in
+                    // onServiceFound; resolve first and filter by the
+                    // `lenscast=1` TXT contract once resolved.
+                    mainHandler.post { onDiscovered(info, epoch) }
                 }
 
                 override fun onServiceLost(info: NsdServiceInfo) {
-                    // A lost info carries no resolved host, so drop by name.
-                    synchronized(lock) {
-                        byHostPort.keys
-                            .filter { byHostPort[it]?.name == info.serviceName }
-                            .forEach { byHostPort.remove(it) }
-                        publishByHostPort()
+                    val friendly = NsdDiscoveryFilter.friendlyName(info.serviceName)
+                    mainHandler.post {
+                        unregisterInfoCallback(friendly)
+                        synchronized(lock) {
+                            resolveQueue.removeAll {
+                                NsdDiscoveryFilter.friendlyName(it.serviceName) == friendly
+                            }
+                            byHostPort.keys
+                                .filter { byHostPort[it]?.name == friendly }
+                                .forEach { byHostPort.remove(it) }
+                            publishByHostPort()
+                        }
                     }
                 }
 
@@ -117,6 +142,7 @@ class NsdDiscoveryClient(private val context: Context) {
             } catch (e: Exception) {
                 Log.w(TAG, "NSD discovery could not start", e)
                 clearListener()
+                releaseMulticastLock()
                 publish(emptyList())
             }
         }
@@ -125,13 +151,18 @@ class NsdDiscoveryClient(private val context: Context) {
     /** Stops the scan and clears [results]; idempotent. */
     fun stop() {
         synchronized(lock) {
-            stopDiscovery()
+            scanEpoch++
+            stopDiscoveryLocked()
             byHostPort.clear()
             publish(emptyList())
         }
     }
 
-    private fun stopDiscovery() {
+    private fun stopDiscoveryLocked() {
+        resolveQueue.clear()
+        resolveInFlight = false
+        clearInfoCallbacksLocked()
+        releaseMulticastLock()
         val listener = discoveryListener ?: return
         discoveryListener = null
         try {
@@ -142,36 +173,185 @@ class NsdDiscoveryClient(private val context: Context) {
     }
 
     private fun clearListener() {
-        synchronized(lock) { discoveryListener = null }
+        synchronized(lock) {
+            discoveryListener = null
+            releaseMulticastLock()
+        }
+    }
+
+    private fun onDiscovered(info: NsdServiceInfo, epoch: Long) {
+        synchronized(lock) {
+            if (epoch != scanEpoch || discoveryListener == null) return
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                registerInfoCallbackLocked(info, epoch)
+                return
+            }
+            val friendly = NsdDiscoveryFilter.friendlyName(info.serviceName)
+            if (resolveQueue.any { NsdDiscoveryFilter.friendlyName(it.serviceName) == friendly }) return
+            if (NsdDiscoveryFilter.isPrioritizedCandidate(info.serviceName)) {
+                resolveQueue.addFirst(info)
+            } else {
+                resolveQueue.addLast(info)
+            }
+            drainResolveQueueLocked(epoch)
+        }
+    }
+
+    private fun drainResolveQueueLocked(epoch: Long) {
+        if (resolveInFlight || epoch != scanEpoch || discoveryListener == null) return
+        val next = resolveQueue.pollFirst() ?: return
+        resolveInFlight = true
+        resolve(next, epoch)
     }
 
     /**
-     * Resolves one LensCast record to its host/port/TXT. Only a resolved
-     * record becomes a candidate — a record that never resolves (the common
-     * churn when a device leaves the LAN mid-scan) stays absent.
+     * Resolves one record to its host/port/TXT and publishes it only when the
+     * resolved TXT map satisfies the `lenscast=1` contract. Runs one resolve at
+     * a time on API < 34 so concurrent `_http._tcp` responders on a busy LAN do
+     * not fail with `FAILURE_ALREADY_ACTIVE`.
      */
-    private fun resolve(info: NsdServiceInfo) {
+    private fun resolve(info: NsdServiceInfo, epoch: Long) {
         try {
+            @Suppress("DEPRECATION")
             nsdManager.resolveService(info, object : NsdManager.ResolveListener {
                 override fun onResolveFailed(resolved: NsdServiceInfo, errorCode: Int) {
                     Log.w(TAG, "NSD resolve failed: $errorCode for ${resolved.serviceName}")
+                    mainHandler.post {
+                        synchronized(lock) {
+                            resolveInFlight = false
+                            drainResolveQueueLocked(epoch)
+                        }
+                    }
                 }
 
                 override fun onServiceResolved(resolved: NsdServiceInfo) {
-                    val host = resolved.host?.hostAddress ?: return
-                    synchronized(lock) {
-                        byHostPort[hostKey(host, resolved.port)] = DiscoveredService(
-                            name = NsdDiscoveryFilter.friendlyName(resolved.serviceName),
-                            host = host,
-                            port = resolved.port,
-                            txt = txtRecords(resolved),
-                        )
-                        publishByHostPort()
+                    val host = primaryHostAddress(resolved)
+                    val txt = txtRecords(resolved)
+                    mainHandler.post {
+                        synchronized(lock) {
+                            resolveInFlight = false
+                            if (epoch == scanEpoch &&
+                                host != null &&
+                                NsdDiscoveryFilter.isLensCastService(resolved.serviceName, txt)
+                            ) {
+                                recordResolvedLocked(resolved, host, txt)
+                            }
+                            drainResolveQueueLocked(epoch)
+                        }
                     }
                 }
             })
         } catch (e: Exception) {
             Log.w(TAG, "NSD resolve could not start for ${info.serviceName}", e)
+            synchronized(lock) {
+                resolveInFlight = false
+                drainResolveQueueLocked(epoch)
+            }
+        }
+    }
+
+    private fun registerInfoCallbackLocked(info: NsdServiceInfo, epoch: Long) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return
+        val key = NsdDiscoveryFilter.friendlyName(info.serviceName)
+        if (serviceInfoCallbacks.containsKey(key)) return
+        val callback = object : NsdManager.ServiceInfoCallback {
+            override fun onServiceInfoCallbackRegistrationFailed(errorCode: Int) {
+                Log.w(TAG, "NSD info callback failed: $errorCode for ${info.serviceName}")
+                synchronized(lock) { serviceInfoCallbacks.remove(key) }
+            }
+
+            override fun onServiceUpdated(updated: NsdServiceInfo) {
+                val host = primaryHostAddress(updated) ?: return
+                val txt = txtRecords(updated)
+                if (!NsdDiscoveryFilter.isLensCastService(updated.serviceName, txt)) return
+                synchronized(lock) {
+                    if (epoch != scanEpoch) return
+                    recordResolvedLocked(updated, host, txt)
+                }
+            }
+
+            override fun onServiceLost() {
+                synchronized(lock) {
+                    serviceInfoCallbacks.remove(key)
+                    byHostPort.keys
+                        .filter { byHostPort[it]?.name == key }
+                        .forEach { byHostPort.remove(it) }
+                    publishByHostPort()
+                }
+            }
+
+            override fun onServiceInfoCallbackUnregistered() {
+                synchronized(lock) { serviceInfoCallbacks.remove(key) }
+            }
+        }
+        serviceInfoCallbacks[key] = callback
+        try {
+            nsdManager.registerServiceInfoCallback(info, mainExecutor, callback)
+        } catch (e: Exception) {
+            serviceInfoCallbacks.remove(key)
+            Log.w(TAG, "NSD info callback could not register for ${info.serviceName}", e)
+        }
+    }
+
+    private fun unregisterInfoCallback(friendlyName: String) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return
+        val callback = synchronized(lock) { serviceInfoCallbacks.remove(friendlyName) } ?: return
+        runCatching { nsdManager.unregisterServiceInfoCallback(callback) }
+    }
+
+    private fun clearInfoCallbacksLocked() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return
+        val callbacks = serviceInfoCallbacks.values.toList()
+        serviceInfoCallbacks.clear()
+        callbacks.forEach { cb ->
+            runCatching { nsdManager.unregisterServiceInfoCallback(cb) }
+        }
+    }
+
+    private fun recordResolvedLocked(
+        resolved: NsdServiceInfo,
+        host: String,
+        txt: Map<String, String>,
+    ) {
+        byHostPort[hostKey(host, resolved.port)] = DiscoveredService(
+            name = NsdDiscoveryFilter.friendlyName(resolved.serviceName),
+            host = host,
+            port = resolved.port,
+            txt = txt,
+        )
+        publishByHostPort()
+    }
+
+    private fun primaryHostAddress(info: NsdServiceInfo): String? {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            val addrs: List<InetAddress> = info.hostAddresses
+            val preferred = addrs.firstOrNull { it is Inet4Address && !it.isLoopbackAddress }
+                ?: addrs.firstOrNull { !it.isLinkLocalAddress && !it.isLoopbackAddress }
+                ?: addrs.firstOrNull()
+            if (preferred?.hostAddress != null) return preferred.hostAddress
+        }
+        @Suppress("DEPRECATION")
+        return info.host?.hostAddress
+    }
+
+    private fun acquireMulticastLock() {
+        runCatching {
+            val lock = multicastLock ?: (context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager)
+                ?.createMulticastLock("LensCastNsdScan")
+                ?.apply { setReferenceCounted(false) }
+                ?.also { multicastLock = it }
+            if (lock != null && !lock.isHeld) lock.acquire()
+        }.onFailure {
+            Log.w(TAG, "Could not acquire NSD multicast lock: ${it.message}")
+        }
+    }
+
+    private fun releaseMulticastLock() {
+        runCatching {
+            val lock = multicastLock ?: return
+            if (lock.isHeld) lock.release()
+        }.onFailure {
+            Log.w(TAG, "Could not release NSD multicast lock: ${it.message}")
         }
     }
 

@@ -332,7 +332,27 @@ class QuickSettingCatalogTest {
     @Test
     fun `scene mode options are the parsable set headed by OFF`() {
         assertEquals(
-            listOf("OFF", "FACE_DETECTION", "NIGHT", "HDR", "SUNSET", "FIREWORKS"),
+            listOf(
+                "OFF",
+                "ACTION",
+                "BARCODE",
+                "BEACH",
+                "CANDLELIGHT",
+                "FACE_PRIORITY",
+                "FIREWORKS",
+                "HDR",
+                "HIGH_SPEED_VIDEO",
+                "LANDSCAPE",
+                "NIGHT",
+                "NIGHT_PORTRAIT",
+                "PARTY",
+                "PORTRAIT",
+                "SNOW",
+                "SPORTS",
+                "STEADYPHOTO",
+                "SUNSET",
+                "THEATRE",
+            ),
             QuickSettingCatalog.sceneModeOptions,
         )
         // Every offered option round-trips through the one parser; OFF clears.
@@ -340,8 +360,12 @@ class QuickSettingCatalogTest {
             if (option == "OFF") {
                 assertNull(CameraSettingsEditor.parseSceneMode(option))
             } else {
-                assertEquals(option, CameraSettingsEditor.parseSceneMode(option))
+                val parsed = CameraSettingsEditor.parseSceneMode(option)
+                assertEquals(option, parsed)
+                assertNotNull(CameraControlPlan.parseSceneMode(parsed))
             }
         }
+        assertNull(CameraSettingsEditor.parseSceneMode(""))
+        assertEquals("FACE_PRIORITY", CameraSettingsEditor.parseSceneMode("FACE_DETECTION"))
     }
 }

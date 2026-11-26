@@ -19,12 +19,14 @@ import com.raulshma.lenscast.R
 fun DisplaySettingsSection(
     showPreview: Boolean,
     onTogglePreview: (Boolean) -> Unit,
+    previewDescription: String? = null,
     dynamicTheming: Boolean? = null,
     onToggleDynamicTheming: ((Boolean) -> Unit)? = null,
 ) {
     SettingsSection(title = stringResource(R.string.settings_section_display)) {
         SwitchSetting(
             title = stringResource(R.string.settings_show_preview),
+            description = previewDescription,
             checked = showPreview,
             onCheckedChange = onTogglePreview,
         )

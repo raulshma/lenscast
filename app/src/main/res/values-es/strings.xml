@@ -299,11 +299,12 @@
     <string name="option_golden_ratio">Proporción dorada</string>
     <string name="option_s3">3 s</string>
     <string name="option_s10">10 s</string>
-    <string name="option_face_detection">Detección de rostros</string>
+    <string name="option_face_priority">Prioridad a rostros</string>
     <string name="option_night">Noche</string>
     <string name="option_hdr">HDR</string>
     <string name="option_sunset">Atardecer</string>
     <string name="option_fireworks">Fuegos artificiales</string>
+    <string name="option_steady_photo">Foto estable</string>
 
     <!-- ── App settings screen ── -->
     <string name="settings_app_title">Ajustes de la app</string>
@@ -324,6 +325,7 @@
     <string name="settings_retry">Reintentar</string>
     <string name="settings_section_display">Pantalla</string>
     <string name="settings_show_preview">Mostrar vista previa de la cámara</string>
+    <string name="settings_show_preview_local_note">Se aplica a la vista previa mostrada en este dispositivo</string>
     <string name="settings_dynamic_color">Color dinámico</string>
     <string name="settings_dynamic_color_description">Aplicar los colores del fondo de pantalla al tema</string>
     <string name="settings_section_streaming">Transmisión</string>

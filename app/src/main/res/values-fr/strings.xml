@@ -302,11 +302,12 @@
     <string name="option_golden_ratio">Nombre d\'or</string>
     <string name="option_s3">3 s</string>
     <string name="option_s10">10 s</string>
-    <string name="option_face_detection">Détection des visages</string>
+    <string name="option_face_priority">Priorité aux visages</string>
     <string name="option_night">Nuit</string>
     <string name="option_hdr">HDR</string>
     <string name="option_sunset">Coucher de soleil</string>
     <string name="option_fireworks">Feux d\'artifice</string>
+    <string name="option_steady_photo">Photo stable</string>
 
     <!-- ── Écran des paramètres de l\'application ── -->
     <string name="settings_app_title">Paramètres de l\'application</string>
@@ -327,6 +328,7 @@
     <string name="settings_retry">Réessayer</string>
     <string name="settings_section_display">Affichage</string>
     <string name="settings_show_preview">Afficher l\'aperçu de la caméra</string>
+    <string name="settings_show_preview_local_note">S\'applique à l\'aperçu affiché sur cet appareil</string>
     <string name="settings_dynamic_color">Couleurs dynamiques</string>
     <string name="settings_dynamic_color_description">Appliquer les couleurs du fond d\'écran au thème</string>
     <string name="settings_section_streaming">Diffusion</string>

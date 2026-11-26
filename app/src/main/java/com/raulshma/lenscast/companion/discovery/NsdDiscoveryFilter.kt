@@ -52,6 +52,15 @@ object NsdDiscoveryFilter {
             ?.value?.trim() == LENSCAST_TXT_VALUE
 
     /**
+     * Resolve-queue ordering hint only (never an acceptance filter — TXT
+     * records arrive only after resolve). Services whose name starts with
+     * `LensCast` move to the front of the sequential resolve queue so busy LANs
+     * resolve LensCast servers before unrelated `_http._tcp` printers.
+     */
+    fun isPrioritizedCandidate(serviceName: String): Boolean =
+        friendlyName(serviceName).startsWith("LensCast", ignoreCase = true)
+
+    /**
      * The display name for a discovered record: the resolver's service name
      * with the `._http._tcp.` DN suffix stripped (NsdManager occasionally
      * delivers the fully-qualified name), trimmed of residual dots —

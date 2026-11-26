@@ -134,9 +134,29 @@ object QuickSettingCatalog {
     /**
      * The scene-mode option names offered in the settings screen; "OFF"
      * clears the override (see [CameraSettingsEditor.parseSceneMode]).
+     * Non-OFF names match the web dashboard's `SCENE_MODE_OPTIONS`.
      */
-    val sceneModeOptions: List<String> =
-        listOf("OFF", "FACE_DETECTION", "NIGHT", "HDR", "SUNSET", "FIREWORKS")
+    val sceneModeOptions: List<String> = listOf(
+        "OFF",
+        "ACTION",
+        "BARCODE",
+        "BEACH",
+        "CANDLELIGHT",
+        "FACE_PRIORITY",
+        "FIREWORKS",
+        "HDR",
+        "HIGH_SPEED_VIDEO",
+        "LANDSCAPE",
+        "NIGHT",
+        "NIGHT_PORTRAIT",
+        "PARTY",
+        "PORTRAIT",
+        "SNOW",
+        "SPORTS",
+        "STEADYPHOTO",
+        "SUNSET",
+        "THEATRE",
+    )
 
     /**
      * Converts the raw editor callback value (Boolean | String | Float)

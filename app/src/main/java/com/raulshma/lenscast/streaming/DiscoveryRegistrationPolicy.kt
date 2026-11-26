@@ -30,6 +30,16 @@ object DiscoveryRegistrationPolicy {
     fun httpTxtRecords(): Map<String, String> = mapOf(LENSCAST_TXT_KEY to LENSCAST_TXT_VALUE)
 
     /**
+     * The HTTP advert refresh verdict: skip only when an HTTP advert is already
+     * active AND its registered params (serviceName, port) match the request.
+     * A port swap must re-register the HTTP advert on the new port.
+     */
+    fun shouldSkipHttpRegister(
+        existing: ServiceDiscoveryManager.HttpAdvert?,
+        requested: ServiceDiscoveryManager.HttpAdvert,
+    ): Boolean = existing != null && existing == requested
+
+    /**
      * The RTSP advert refresh verdict: skip only when an advert is already
      * registered AND the requested params (port/path/authRequired) equal the
      * last attempt. Anything else — a first registration, or ANY param drift

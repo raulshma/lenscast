@@ -480,10 +480,13 @@ fun CameraSettingsScreen(
 
             item {
                 SettingsSection(title = stringResource(R.string.settings_section_scene)) {
+                    val selectedScene = settings.sceneMode?.let {
+                        com.raulshma.lenscast.camera.CameraSettingsEditor.parseSceneMode(it)
+                    } ?: "OFF"
                     DropdownSetting(
                         title = stringResource(R.string.settings_scene_mode),
                         options = QuickSettingCatalog.sceneModeOptions,
-                        selected = settings.sceneMode ?: "OFF",
+                        selected = selectedScene,
                         onSelect = { viewModel.updateSceneMode(it) },
                         enabled = capabilities.canEdit,
                     )
@@ -582,11 +585,12 @@ internal fun dropdownOptionLabel(option: String): String = when (option) {
     "S3" -> stringResource(R.string.option_s3)
     "S10" -> stringResource(R.string.option_s10)
     // Scene modes
-    "FACE_DETECTION" -> stringResource(R.string.option_face_detection)
+    "FACE_PRIORITY" -> stringResource(R.string.option_face_priority)
     "NIGHT" -> stringResource(R.string.option_night)
     "HDR" -> stringResource(R.string.option_hdr)
     "SUNSET" -> stringResource(R.string.option_sunset)
     "FIREWORKS" -> stringResource(R.string.option_fireworks)
+    "STEADYPHOTO" -> stringResource(R.string.option_steady_photo)
     else -> chipLabel(option)
 }
 

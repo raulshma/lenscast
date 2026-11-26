@@ -3,6 +3,7 @@ package com.raulshma.lenscast.streaming
 import android.content.Context
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.util.Log
 import java.util.concurrent.atomic.AtomicBoolean
@@ -21,8 +22,15 @@ class ServiceDiscoveryManager(private val context: Context) {
     private val isRtspRegistered = AtomicBoolean(false)
     @Volatile private var registerAttempts = 0
 
-    /** The RTSP advert's last registration attempt; the change-detection input for a refresh. */
+    /** The HTTP and RTSP adverts' last registration attempts; change-detection inputs for refreshes. */
+    @Volatile private var httpAdvert: HttpAdvert? = null
     @Volatile private var rtspAdvert: RtspAdvert? = null
+    @Volatile private var multicastLock: WifiManager.MulticastLock? = null
+
+    data class HttpAdvert(
+        val port: Int,
+        val serviceName: String = DEFAULT_SERVICE_NAME,
+    )
 
     data class RtspAdvert(
         val port: Int = com.raulshma.lenscast.core.StreamDefaults.RTSP_PORT,
@@ -36,10 +44,12 @@ class ServiceDiscoveryManager(private val context: Context) {
         deviceName: String = Build.MODEL,
         rtsp: RtspAdvert? = null,
     ) {
-        if (isRegistered.get()) {
-            Log.d(TAG, "mDNS service already registered")
+        acquireMulticastLock()
+        val requestedHttp = HttpAdvert(port = port, serviceName = serviceName)
+        if (DiscoveryRegistrationPolicy.shouldSkipHttpRegister(httpAdvert, requestedHttp)) {
+            Log.d(TAG, "mDNS HTTP service already registered on port $port")
         } else {
-            registerHttp(port, serviceName)
+            registerHttp(port, serviceName, requestedHttp)
         }
         // Always (re-)evaluate the RTSP advert: it is re-registered when
         // re-invoked with changed params (the late auth toggle), and a
@@ -47,7 +57,18 @@ class ServiceDiscoveryManager(private val context: Context) {
         if (rtsp != null) registerRtsp(port = rtsp.port, path = rtsp.path, authRequired = rtsp.authRequired, serviceName = serviceName)
     }
 
-    private fun registerHttp(port: Int, serviceName: String) {
+    private fun registerHttp(port: Int, serviceName: String, requested: HttpAdvert) {
+        registrationListener?.let {
+            if (DiscoveryRegistrationPolicy.shouldUnregister(listenerPresent = true)) {
+                try {
+                    nsdManager.unregisterService(it)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to unregister stale HTTP mDNS advert", e)
+                }
+            }
+            registrationListener = null
+            isRegistered.set(false)
+        }
 
         val serviceInfo = buildHttpServiceInfo(
             name = makeUniqueServiceName(serviceName),
@@ -94,9 +115,11 @@ class ServiceDiscoveryManager(private val context: Context) {
                 NsdManager.PROTOCOL_DNS_SD,
                 registrationListener,
             )
+            httpAdvert = requested
         } catch (e: Exception) {
             Log.e(TAG, "Failed to register mDNS service", e)
             isRegistered.set(false)
+            httpAdvert = null
         }
     }
 
@@ -128,8 +151,37 @@ class ServiceDiscoveryManager(private val context: Context) {
         rtspRegistrationListener = null
         isRegistered.set(false)
         isRtspRegistered.set(false)
+        httpAdvert = null
         rtspAdvert = null
         registerAttempts = 0
+        releaseMulticastLock()
+    }
+
+    /**
+     * Keep a Wi-Fi multicast lock while advertising so firmware mDNS filters
+     * do not drop incoming LAN browse/resolve queries when idle.
+     */
+    private fun acquireMulticastLock() {
+        runCatching {
+            val lock = multicastLock ?: (context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager)
+                ?.createMulticastLock("LensCastMdnsAdvert")
+                ?.apply { setReferenceCounted(false) }
+                ?.also { multicastLock = it }
+            if (lock != null && !lock.isHeld) {
+                lock.acquire()
+            }
+        }.onFailure {
+            Log.w(TAG, "Could not acquire multicast lock: ${it.message}")
+        }
+    }
+
+    private fun releaseMulticastLock() {
+        runCatching {
+            val lock = multicastLock ?: return
+            if (lock.isHeld) lock.release()
+        }.onFailure {
+            Log.w(TAG, "Could not release multicast lock: ${it.message}")
+        }
     }
 
     private fun registerRtsp(port: Int, path: String, authRequired: Boolean, serviceName: String) {

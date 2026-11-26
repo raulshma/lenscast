@@ -790,4 +790,30 @@ class StreamingSessionTest {
 
         assertNull(shadowOf(appContext).nextStoppedService)
     }
+
+    @Test
+    fun `server foreground is preserved during runChoreographed soft restart`() {
+        drainStoppedServices()
+
+        runWithMainPumped {
+            session.runChoreographed {
+                session.stopServerForegroundIfIdle()
+            }
+        }
+
+        assertNull(shadowOf(appContext).nextStoppedService)
+    }
+
+    @Test
+    fun `soft recovery refreshes camera provider and retries rebind when selected lens went missing`() {
+        every { cameraService.rebindUseCases() } returnsMany listOf(false, true)
+        every { cameraService.hasMissingSelectedLens() } returns true
+        io.mockk.coEvery { cameraService.recoverProviderAndReenumerate() } returns true
+
+        val recovered = runWithMainPumped { session.recover(com.raulshma.lenscast.core.WatchdogPolicy.RecoveryTier.SOFT) }
+
+        assertTrue(recovered)
+        io.mockk.coVerify(exactly = 1) { cameraService.recoverProviderAndReenumerate() }
+        verify(exactly = 2) { cameraService.rebindUseCases() }
+    }
 }

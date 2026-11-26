@@ -61,6 +61,14 @@ class DiscoveryRegistrationPolicyTest {
         assertFalse(DiscoveryRegistrationPolicy.shouldSkipRtspRegister(advert(), advert(path = "stream")))
     }
 
+    @Test
+    fun `http advert skips only matching port and name`() {
+        val first = ServiceDiscoveryManager.HttpAdvert(port = 8080)
+        assertFalse(DiscoveryRegistrationPolicy.shouldSkipHttpRegister(null, first))
+        assertTrue(DiscoveryRegistrationPolicy.shouldSkipHttpRegister(first, ServiceDiscoveryManager.HttpAdvert(port = 8080)))
+        assertFalse(DiscoveryRegistrationPolicy.shouldSkipHttpRegister(first, ServiceDiscoveryManager.HttpAdvert(port = 9090)))
+    }
+
     // ── shouldUnregister ──
 
     @Test

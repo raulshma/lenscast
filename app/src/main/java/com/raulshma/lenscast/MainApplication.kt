@@ -346,14 +346,25 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph, R
     override val softRestart: SoftRestartLadder by lazy {
         SoftRestartLadder(
             stopRecording = { recordingController.stop() },
-            stopServer = { streamToggle.stopServer() },
+            // Stop outputs and bounce the transport without ending
+            // StreamingSession mid-ladder: calling streamToggle.stopServer()
+            // tears down StreamingService while the server is down, which
+            // makes startServer() fail with ForegroundServiceStartNotAllowedException
+            // when the camera device is backgrounded (issue #26 item 7).
+            stopServer = { streamingManager.stopStreaming() },
             // recoverLocked, not recover: the ladder's whole run holds the
             // choreography lock (launchSoftRestart wraps it in
             // runChoreographed), and the rebind step's SOFT mechanics are
             // that lock's non-locking half — the locking recover would
             // deadlock on the ladder's own hold.
             rebindCamera = { streamingSession.recoverLocked(WatchdogPolicy.RecoveryTier.SOFT) },
-            startServer = { streamToggle.startServerWithOutputs() },
+            startServer = {
+                val outcome = streamToggle.startServerWithOutputs()
+                if (!outcome.isStartFailure && !streamingManager.isLiveStreaming()) {
+                    streamingSession.end()
+                }
+                outcome
+            },
         )
     }
     // The crash handler's loop-guard counter (blueprint item 1): persisted

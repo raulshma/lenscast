@@ -346,6 +346,22 @@ class WebAuthGateTest {
         assertEquals(SessionRole.ADMIN, gate.basicRole(USER, PASSWORD))
     }
 
+    @Test
+    fun `basic cache invalidates when credentials rotate and respects lockout`() {
+        val gate = gateWithViewer()
+        assertEquals(SessionRole.ADMIN, gate.basicRole(USER, PASSWORD))
+        assertEquals(SessionRole.VIEWER, gate.basicRole(VIEWER_USER, VIEWER_PASSWORD))
+
+        // Rotating password invalidates cached verification immediately.
+        gate.setCredentials(USER, StreamAuthCrypto.hashPassword("new pass"))
+        assertNull(gate.basicRole(USER, PASSWORD))
+        assertEquals(SessionRole.ADMIN, gate.basicRole(USER, "new pass"))
+
+        // Exhausting failed attempts still locks out even after a prior cached hit.
+        repeat(10) { attempt -> assertNull(gate.basicRole(VIEWER_USER, "wrong-$attempt")) }
+        assertNull(gate.basicRole(VIEWER_USER, VIEWER_PASSWORD))
+    }
+
     companion object {
         private const val USER = "admin"
         private const val PASSWORD = "correct horse battery staple"

@@ -241,6 +241,7 @@ object CaptureReadbackPolicy {
         CaptureRequest.CONTROL_SCENE_MODE_PARTY -> "PARTY"
         CaptureRequest.CONTROL_SCENE_MODE_CANDLELIGHT -> "CANDLELIGHT"
         CaptureRequest.CONTROL_SCENE_MODE_BARCODE -> "BARCODE"
+        CaptureRequest.CONTROL_SCENE_MODE_HIGH_SPEED_VIDEO -> "HIGH_SPEED_VIDEO"
         CaptureRequest.CONTROL_SCENE_MODE_HDR -> "HDR"
         // settings.sceneMode takes any camera2 scene mode by number; a
         // vendor-private one (DEVICE_CUSTOM_START..) has no name to show.

@@ -208,7 +208,7 @@ class SettingsWebHandler(
                 resolution = parseEnum(cam.resolution, current.resolution),
                 stabilization = cam.stabilization,
                 hdrMode = parseEnum(cam.hdrMode, current.hdrMode),
-                sceneMode = cam.sceneMode,
+                sceneMode = cam.sceneMode?.let(com.raulshma.lenscast.camera.CameraSettingsEditor::parseSceneMode),
                 nightVisionMode = parseEnum(cam.nightVisionMode, current.nightVisionMode),
                 // Torch is NOT a web-camera-section setting: the camera DTO
                 // carries no torch fields (GET can't present them, PUT can't

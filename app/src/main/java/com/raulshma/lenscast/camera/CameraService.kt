@@ -898,6 +898,35 @@ class CameraService internal constructor(
         }
     }
 
+    internal fun hasMissingSelectedLens(): Boolean {
+        val provider = cameraProvider ?: return false
+        val available = provider.availableCameraInfos
+        if (available.isEmpty()) return false
+        return try {
+            _selectedLens.value.selector.filter(available).isEmpty()
+        } catch (_: Exception) {
+            true
+        }
+    }
+
+    /**
+     * Rebuilds the CameraX singleton and re-enumerates lenses when dynamic
+     * HAL camera-presence updates dropped an active lens from `availableCameraInfos`
+     * (issue #26 item 1). Must be called on Main or from a coroutine hopping to Main.
+     */
+    @androidx.annotation.OptIn(androidx.camera.camera2.interop.ExperimentalCamera2Interop::class)
+    internal suspend fun recoverProviderAndReenumerate(): Boolean = withContext(Dispatchers.Main) {
+        try {
+            val recovered = recoverProvider()
+            cameraProvider = recovered
+            enumerateCameras(recovered)
+            recovered.availableCameraInfos.isNotEmpty()
+        } catch (e: Exception) {
+            Log.w(TAG, "Provider recovery during lens refresh failed", e)
+            false
+        }
+    }
+
     private suspend fun awaitProvider(): ProcessCameraProvider {
         val future = ProcessCameraProvider.getInstance(context)
         return withTimeoutOrNull(10_000L) {
@@ -1210,7 +1239,15 @@ class CameraService internal constructor(
             return CameraResetResult(verdict)
         }
         errorRebindAttempts.incrementAndGet()
-        val bound = withContext(Dispatchers.Main) { rebindUseCases() }
+        if (hasMissingSelectedLens()) {
+            recoverProviderAndReenumerate()
+        }
+        var bound = withContext(Dispatchers.Main) { rebindUseCases() }
+        if (!bound && (_cameraState.value as? CameraState.Error)?.message?.contains("No available camera") == true) {
+            if (recoverProviderAndReenumerate()) {
+                bound = withContext(Dispatchers.Main) { rebindUseCases() }
+            }
+        }
         Log.d(TAG, "resetCamera: bounded manual rebind (attempt $errorRebindAttempts, bound=$bound)")
         return CameraResetResult(CameraErrorPolicy.Verdict.REBIND, bound)
     }
@@ -1495,6 +1532,14 @@ class CameraService internal constructor(
         // re-binds the instance, and the hook with it.
         Camera2Interop.Extender(analysisBuilder).setSessionCaptureCallback(captureReadbackCallback)
 
+        // If CameraX's dynamic camera presence list dropped the selected lens
+        // mid-session, re-enumerate currently exposed lenses before building
+        // pre-bind support and binding (issue #26 item 1).
+        if (hasMissingSelectedLens()) {
+            Log.w(TAG, "bindUseCases: selected lens missing from availableCameraInfos; re-enumerating")
+            enumerateCameras(provider)
+        }
+
         val selectedLens = _availableLenses.value.getOrNull(_selectedLens.value.index)
         val preBindSupport = queryPreBindSupport(provider, selectedLens?.physicalCameraId)
         val bindPlan = CameraControlPlan.from(
@@ -1559,9 +1604,30 @@ class CameraService internal constructor(
                     targetFpsRange = bindFpsRange,
                 )
             } catch (e: Exception) {
-                Log.e(TAG, "bindUseCases: failed to bind camera", e)
-                _cameraState.value = CameraState.Error("Failed to start camera: ${e.message}")
-                return false
+                if (e is IllegalArgumentException && provider.availableCameraInfos.isNotEmpty()) {
+                    Log.w(TAG, "bindUseCases: camera selector missing at bind; re-enumerating and retrying once", e)
+                    enumerateCameras(provider)
+                    try {
+                        bindLargestCompatible(
+                            provider,
+                            owner,
+                            combinations = orderedCombinations(
+                                listOfNotNull(preview, imageCapture, imageAnalysis),
+                                extra = null,
+                            ),
+                            writeBack = true,
+                            targetFpsRange = bindFpsRange,
+                        )
+                    } catch (retryError: Exception) {
+                        Log.e(TAG, "bindUseCases: failed to bind camera after re-enumeration", retryError)
+                        _cameraState.value = CameraState.Error("Failed to start camera: ${retryError.message}")
+                        return false
+                    }
+                } else {
+                    Log.e(TAG, "bindUseCases: failed to bind camera", e)
+                    _cameraState.value = CameraState.Error("Failed to start camera: ${e.message}")
+                    return false
+                }
             }
 
             bound.let { cam ->

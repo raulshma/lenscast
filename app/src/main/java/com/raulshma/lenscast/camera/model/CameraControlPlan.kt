@@ -208,6 +208,42 @@ data class CameraControlPlan(
                 CaptureRequest.CONTROL_MODE_USE_SCENE_MODE
             }
 
+        /**
+         * Translates a persisted or wire [sceneMode] string (either a Camera2
+         * enum wire name such as `"NIGHT"` / `"FACE_PRIORITY"` or a numeric
+         * mode ID) into the `CaptureRequest.CONTROL_SCENE_MODE_*` constant;
+         * `"OFF"`, `"AUTO"`, and blanks clear to null.
+         */
+        fun parseSceneMode(raw: String?): Int? {
+            val trimmed = raw?.trim().orEmpty()
+            if (trimmed.isEmpty()) return null
+            trimmed.toIntOrNull()?.let { return it }
+            return when (trimmed.uppercase(java.util.Locale.US)) {
+                "OFF", "AUTO" -> null
+                "DISABLED" -> CaptureRequest.CONTROL_SCENE_MODE_DISABLED
+                "FACE_PRIORITY", "FACE_DETECTION", "FACE_PRIORITY_LOW_LIGHT" ->
+                    CaptureRequest.CONTROL_SCENE_MODE_FACE_PRIORITY
+                "ACTION" -> CaptureRequest.CONTROL_SCENE_MODE_ACTION
+                "PORTRAIT" -> CaptureRequest.CONTROL_SCENE_MODE_PORTRAIT
+                "LANDSCAPE" -> CaptureRequest.CONTROL_SCENE_MODE_LANDSCAPE
+                "NIGHT" -> CaptureRequest.CONTROL_SCENE_MODE_NIGHT
+                "NIGHT_PORTRAIT" -> CaptureRequest.CONTROL_SCENE_MODE_NIGHT_PORTRAIT
+                "THEATRE" -> CaptureRequest.CONTROL_SCENE_MODE_THEATRE
+                "BEACH" -> CaptureRequest.CONTROL_SCENE_MODE_BEACH
+                "SNOW" -> CaptureRequest.CONTROL_SCENE_MODE_SNOW
+                "SUNSET" -> CaptureRequest.CONTROL_SCENE_MODE_SUNSET
+                "STEADYPHOTO" -> CaptureRequest.CONTROL_SCENE_MODE_STEADYPHOTO
+                "FIREWORKS" -> CaptureRequest.CONTROL_SCENE_MODE_FIREWORKS
+                "SPORTS" -> CaptureRequest.CONTROL_SCENE_MODE_SPORTS
+                "PARTY" -> CaptureRequest.CONTROL_SCENE_MODE_PARTY
+                "CANDLELIGHT" -> CaptureRequest.CONTROL_SCENE_MODE_CANDLELIGHT
+                "BARCODE" -> CaptureRequest.CONTROL_SCENE_MODE_BARCODE
+                "HIGH_SPEED_VIDEO" -> CaptureRequest.CONTROL_SCENE_MODE_HIGH_SPEED_VIDEO
+                "HDR" -> CaptureRequest.CONTROL_SCENE_MODE_HDR
+                else -> null
+            }
+        }
+
         /** The [CameraControlPlan.unsupported] names — one per control the plan can neutralise. */
         const val UNSUPPORTED_SCENE_MODE = "scene mode"
         const val UNSUPPORTED_AE_MODE = "AE mode"
@@ -350,7 +386,8 @@ data class CameraControlPlan(
                     null
                 }
 
-            settings.sceneMode?.toIntOrNull()?.let { sceneMode = it }
+            val parsedSceneMode = parseSceneMode(settings.sceneMode)
+            parsedSceneMode?.let { sceneMode = it }
 
             return when (settings.nightVisionMode) {
                 NightVisionMode.ON -> {
@@ -402,7 +439,7 @@ data class CameraControlPlan(
                 NightVisionMode.OFF -> {
                     // Reset scene mode when disabling night vision
                     // (only if not overridden by HDR or manual scene mode)
-                    if (settings.hdrMode != HdrMode.ON && settings.sceneMode == null) {
+                    if (settings.hdrMode != HdrMode.ON && parsedSceneMode == null) {
                         sceneMode = CaptureRequest.CONTROL_SCENE_MODE_DISABLED
                     }
                     val offAeMode =

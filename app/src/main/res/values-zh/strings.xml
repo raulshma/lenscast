@@ -295,11 +295,12 @@
     <string name="option_golden_ratio">黄金比例</string>
     <string name="option_s3">3 秒</string>
     <string name="option_s10">10 秒</string>
-    <string name="option_face_detection">人脸检测</string>
+    <string name="option_face_priority">人脸优先</string>
     <string name="option_night">夜间</string>
     <string name="option_hdr">HDR</string>
     <string name="option_sunset">日落</string>
     <string name="option_fireworks">烟花</string>
+    <string name="option_steady_photo">稳定照片</string>
 
     <!-- ── 应用设置界面 ── -->
     <string name="settings_app_title">应用设置</string>
@@ -320,6 +321,7 @@
     <string name="settings_retry">重试</string>
     <string name="settings_section_display">显示</string>
     <string name="settings_show_preview">显示相机预览</string>
+    <string name="settings_show_preview_local_note">仅适用于此设备上显示的预览</string>
     <string name="settings_dynamic_color">动态颜色</string>
     <string name="settings_dynamic_color_description">将壁纸颜色应用于应用主题</string>
     <string name="settings_section_streaming">直播</string>

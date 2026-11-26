@@ -338,9 +338,13 @@ class StreamingManager(
     // its sessions die with the server on every stop.
     private val webTransport: WebTransport = WebTransport(
         initialPort = StreamDefaults.WEB_PORT,
-        onRunningChanged = { running -> _isServerRunning.value = running },
+        onRunningChanged = { running ->
+            _isServerRunning.value = running
+            if (!running) unregisterMdnsService()
+        },
         onReady = {
             _streamUrl.value = buildVideoUrl()
+            syncMdnsRegistration()
             Log.d(TAG, "Streaming server ready at ${_streamUrl.value}")
         },
         startWhepSessions = { whepServer.start() },
@@ -349,6 +353,9 @@ class StreamingManager(
     )
 
     private val webStreamingActive = AtomicBoolean(false)
+    private val webSuspendedByDisable = AtomicBoolean(false)
+    private val rtspSuspendedByDisable = AtomicBoolean(false)
+    private val rtmpSuspendedByDisable = AtomicBoolean(false)
 
     /**
      * The user's persisted JPEG quality — the frame path's base. The battery
@@ -1174,6 +1181,9 @@ class StreamingManager(
     }
 
     fun stopStreaming() {
+        webSuspendedByDisable.set(false)
+        rtspSuspendedByDisable.set(false)
+        rtmpSuspendedByDisable.set(false)
         stopWebStreaming()
         stopRtspStreaming()
         stopRtmpStreaming()
@@ -1185,6 +1195,9 @@ class StreamingManager(
     }
 
     fun pauseStreaming() {
+        webSuspendedByDisable.set(false)
+        rtspSuspendedByDisable.set(false)
+        rtmpSuspendedByDisable.set(false)
         stopWebStreaming()
         stopRtspStreaming()
         stopRtmpStreaming()
@@ -1237,6 +1250,7 @@ class StreamingManager(
             Log.w(TAG, "Cannot start web streaming: web streaming is disabled")
             return false
         }
+        webSuspendedByDisable.set(false)
         if (webStreamingActive.getAndSet(true)) return true
 
         if (!ensureServerRunning()) {
@@ -1252,9 +1266,6 @@ class StreamingManager(
         // track — the hub's start runs the policy verdict immediately, so
         // HLS/WS video have an encoded source before the first client asks.
         encodedHub.refresh()
-        if (mdnsEnabled.get()) {
-            registerMdnsService(webTransport.port())
-        }
 
         publishWebActiveMirror()
         Log.d(TAG, "Web streaming started at ${_streamUrl.value}")
@@ -1271,7 +1282,6 @@ class StreamingManager(
         _streamUrl.value = ""
         _clientCount.value = 0
         lastReportedClientCount = -1
-        unregisterMdnsService()
         publishWebActiveMirror()
         Log.d(TAG, "Web streaming stopped")
     }
@@ -1286,6 +1296,7 @@ class StreamingManager(
             Log.w(TAG, "Cannot start RTSP streaming: RTSP is disabled")
             return false
         }
+        rtspSuspendedByDisable.set(false)
         if (rtspOutput.isActive()) return true
         val started = rtspOutput.start()
         encodedHub.refresh()
@@ -1342,10 +1353,18 @@ class StreamingManager(
         rtmpOutput.isActive() && streamAudioEnabled.get() && !recordingAudioCaptureActive
 
     fun setRtmpEnabled(enabled: Boolean) {
+        val wasActive = rtmpOutput.isActive()
         if (!rtmpOutput.setEnabled(enabled)) return
         _isRtmpEnabled.value = enabled
         if (!enabled) {
+            if (wasActive) {
+                rtmpSuspendedByDisable.set(true)
+            }
             stopRtmpStreaming()
+        } else if (rtmpSuspendedByDisable.getAndSet(false) ||
+            (isLiveStreaming() && rtmpOutput.configuredUrl().isNotBlank())
+        ) {
+            startRtmpStreaming()
         }
     }
 
@@ -1785,8 +1804,13 @@ class StreamingManager(
         _isWebEnabled.value = enabled
         webTransport.setWebStreamingEnabled(enabled)
 
-        if (!enabled && webStreamingActive.get()) {
-            stopWebStreaming()
+        if (!enabled) {
+            if (webStreamingActive.get()) {
+                webSuspendedByDisable.set(true)
+                stopWebStreaming()
+            }
+        } else if (webSuspendedByDisable.getAndSet(false) || isLiveStreaming()) {
+            startWebStreaming()
         }
     }
 
@@ -1855,6 +1879,7 @@ class StreamingManager(
         // The RTSP authorizer reads the (possibly restarted) auth spec live —
         // a hot-swap through the output, no restart owed.
         rtspOutput.setAuth()
+        syncMdnsRegistration()
     }
 
     /**
@@ -1883,12 +1908,18 @@ class StreamingManager(
         if (!rtspOutput.setEnabled(enabled)) return
         _isRtspEnabled.value = enabled
         if (!enabled) {
+            if (rtspOutput.isActive()) {
+                rtspSuspendedByDisable.set(true)
+            }
             stopRtspStreaming()
+        } else if (rtspSuspendedByDisable.getAndSet(false) || isLiveStreaming()) {
+            startRtspStreaming()
         }
     }
 
     fun setRtspPort(port: Int) {
         rtspOutput.setPort(port)
+        syncMdnsRegistration()
     }
 
     fun setRtspInputFormat(format: RtspInputFormat) {
@@ -1959,12 +1990,16 @@ class StreamingManager(
         val changed = mdnsEnabled.getAndSet(enabled) != enabled
         if (!changed) return
 
-        if (enabled && webStreamingActive.get() && webStreamingEnabled.get()) {
+        syncMdnsRegistration()
+        Log.d(TAG, "mDNS service discovery ${if (enabled) "enabled" else "disabled"}")
+    }
+
+    private fun syncMdnsRegistration() {
+        if (mdnsEnabled.get() && _isServerRunning.value) {
             registerMdnsService(webTransport.port())
         } else {
             unregisterMdnsService()
         }
-        Log.d(TAG, "mDNS service discovery ${if (enabled) "enabled" else "disabled"}")
     }
 
     private fun registerMdnsService(port: Int) {

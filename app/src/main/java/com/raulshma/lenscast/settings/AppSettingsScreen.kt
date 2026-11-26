@@ -378,6 +378,11 @@ fun AppSettingsScreen(
                 DisplaySettingsSection(
                     showPreview = showPreview,
                     onTogglePreview = { viewModel.updateShowPreview(it) },
+                    previewDescription = if (!capabilities.livePublisherStatus) {
+                        stringResource(R.string.settings_show_preview_local_note)
+                    } else {
+                        null
+                    },
                     dynamicTheming = dynamicTheming,
                     onToggleDynamicTheming = { viewModel.updateDynamicThemingEnabled(it) },
                 )

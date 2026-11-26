@@ -42,7 +42,11 @@ class CameraSettingsEditor(
             if (value == "Auto") null else value.toIntOrNull()
 
         internal fun parseSceneMode(mode: String): String? =
-            if (mode == "OFF") null else mode
+            when (val normalized = mode.trim().uppercase(java.util.Locale.US)) {
+                "", "OFF", "AUTO", "DISABLED" -> null
+                "FACE_DETECTION" -> "FACE_PRIORITY"
+                else -> normalized
+            }
 
         /**
          * The manual-axis null fill, applied at this single writer seam so

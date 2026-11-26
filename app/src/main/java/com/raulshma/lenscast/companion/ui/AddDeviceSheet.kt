@@ -665,31 +665,58 @@ internal class QrDecodeAnalyzer(
         val width = image.width
         val height = image.height
         if (width <= 0 || height <= 0) return null
-        val buffer = plane.buffer
-        val rowStride = plane.rowStride
-        val pixelStride = plane.pixelStride
-        val luminance = ByteArray(width * height)
+        val luminance = extractYPlaneLuminance(
+            buffer = plane.buffer,
+            width = width,
+            height = height,
+            rowStride = plane.rowStride,
+            pixelStride = plane.pixelStride,
+        ) ?: return null
+        return PlanarYUVLuminanceSource(
+            luminance, width, height, 0, 0, width, height, false,
+        )
+    }
+}
+
+/**
+ * Extracts a packed [width] × [height] luminance plane from [buffer] without
+ * relying on the caller's buffer position. Rewinding a duplicate guards against
+ * preceding image consumers (such as `ImageProxy.toBitmap()`) advancing
+ * `buffer.position()` and triggering a `BufferUnderflowException` on tight-
+ * packed frames (`pixelStride == 1 && rowStride == width`).
+ */
+internal fun extractYPlaneLuminance(
+    buffer: java.nio.ByteBuffer,
+    width: Int,
+    height: Int,
+    rowStride: Int,
+    pixelStride: Int,
+): ByteArray? {
+    if (width <= 0 || height <= 0) return null
+    val dup = buffer.duplicate().apply { rewind() }
+    val luminance = ByteArray(width * height)
+    return try {
         when {
             pixelStride == 1 && rowStride == width ->
-                buffer.get(luminance, 0, luminance.size)
+                dup.get(luminance, 0, luminance.size)
             pixelStride == 1 -> {
                 for (row in 0 until height) {
-                    buffer.position(row * rowStride)
-                    buffer.get(luminance, row * width, width)
+                    dup.position(row * rowStride)
+                    dup.get(luminance, row * width, width)
                 }
             }
             else -> {
                 for (row in 0 until height) {
                     val rowStart = row * rowStride
                     for (col in 0 until width) {
-                        luminance[row * width + col] = buffer.get(rowStart + col * pixelStride)
+                        luminance[row * width + col] = dup.get(rowStart + col * pixelStride)
                     }
                 }
             }
         }
-        return PlanarYUVLuminanceSource(
-            luminance, width, height, 0, 0, width, height, false,
-        )
+        luminance
+    } catch (_: Exception) {
+        null
     }
 }
 

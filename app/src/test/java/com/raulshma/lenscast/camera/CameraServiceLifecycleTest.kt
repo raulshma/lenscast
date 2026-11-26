@@ -222,4 +222,30 @@ class CameraServiceLifecycleTest {
         assertTrue(state is CameraState.Error)
         assertEquals(CameraErrorPolicy.Verdict.POLICY_DENIED, (state as CameraState.Error).recovery)
     }
+
+    @Test
+    fun `rebindUseCases re-enumerates and binds available camera when selected lens disappears`() {
+        val provider = fixture.serviceField<ProcessCameraProvider>("cameraProvider")
+        val remainingInfo = mockk<androidx.camera.core.CameraInfo>(relaxed = true)
+        every { remainingInfo.lensFacing } returns androidx.camera.core.CameraSelector.LENS_FACING_BACK
+        every { provider.availableCameraInfos } returns listOf(remainingInfo)
+
+        // Plant a selector that filters everything out (stale camera ID dropped by HAL)
+        // followed by a relaxed bind once re-enumeration selects an available lens.
+        var attempts = 0
+        every { provider.bindToLifecycle(any(), any(), any<SessionConfig>()) } answers {
+            attempts++
+            if (attempts == 1) throw IllegalArgumentException("No available camera can be found")
+            fixture.sessionConfigs += thirdArg<SessionConfig>()
+            fixture.binds += thirdArg<SessionConfig>().useCases
+            fixture.camera
+        }
+
+        fixture.service.acquireKeepAlive()
+        val bound = fixture.service.rebindUseCases()
+
+        assertTrue(bound)
+        assertEquals(CameraState.Ready, fixture.service.cameraState.value)
+        assertTrue(attempts >= 2)
+    }
 }
