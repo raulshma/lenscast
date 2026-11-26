@@ -1,5 +1,6 @@
 package com.raulshma.lenscast.streaming.whep
 
+import com.raulshma.lenscast.camera.model.MaskingZone
 import com.raulshma.lenscast.camera.model.OverlaySettings
 import com.raulshma.lenscast.streaming.EncodedOverlayCompositor
 import org.junit.Assert.assertArrayEquals
@@ -63,6 +64,25 @@ class WhepTapFrameTest {
         assertEquals(64, tap.height)
         assertEquals(200, tap.nv21[16 * 32 + 16].toInt() and 0xFF)
         assertArrayEquals(ByteArray(cameraFrame.size), cameraFrame)
+    }
+
+    @Test
+    fun `the tap frame carries privacy masks with the text overlay off`() {
+        val compositor = EncodedOverlayCompositor(FakeRasterizer()).apply {
+            setOverlaySettings(
+                OverlaySettings(
+                    enabled = false,
+                    maskingEnabled = true,
+                    maskingZones = listOf(MaskingZone(x = 0.25f, y = 0.25f, width = 0.25f, height = 0.25f)),
+                ),
+            )
+        }
+        val cameraFrame = ByteArray(64 * 64 * 3 / 2) { 90.toByte() }
+
+        val tap = WhepServer.prepareTapFrame(cameraFrame, 64, 64, rotation = 0, compositor, nowMs = 0)
+
+        assertEquals(0, tap.nv21[20 * 64 + 20].toInt() and 0xFF)
+        assertEquals(90, cameraFrame[20 * 64 + 20].toInt() and 0xFF)
     }
 
     @Test

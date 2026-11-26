@@ -367,6 +367,12 @@ function MaskEditPicture(props: {
       startGesture(e, surface, box, () => editor.beginResize(selectedId, handle, point))
       return
     }
+    // An explicitly armed draw owns the next press, including over an existing
+    // zone; otherwise adding a second zone could only ever move the first.
+    if (editor.drawing()) {
+      startGesture(e, surface, box, () => editor.beginDraw(point))
+      return
+    }
     // The selected zone's label sits outside its own box: a press on it is a press on its zone.
     const labelZone = onLabel(target) ? editor.zones().find((zone) => zone.id === zoneIdOf(target)) : undefined
     const zone = labelZone ?? zoneAt(point)
@@ -374,10 +380,6 @@ function MaskEditPicture(props: {
       // Select first: a command is ignored once a gesture is in flight.
       editor.select(zone.id)
       startGesture(e, surface, box, () => editor.beginMove(zone.id, point))
-      return
-    }
-    if (editor.drawing()) {
-      startGesture(e, surface, box, () => editor.beginDraw(point))
       return
     }
     editor.select(null)

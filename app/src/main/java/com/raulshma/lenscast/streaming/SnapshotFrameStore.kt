@@ -1,11 +1,9 @@
 package com.raulshma.lenscast.streaming
 
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.ImageFormat
-import android.graphics.Matrix
 import android.graphics.Rect
 import android.graphics.YuvImage
+import com.raulshma.lenscast.core.YuvConverter
 import java.io.ByteArrayOutputStream
 
 /**
@@ -40,22 +38,25 @@ class SnapshotFrameStore {
      * The retained frame as a JPEG, or null when no frame was retained yet or
      * the encode failed — the event logs fine without it.
      */
-    fun encodeJpeg(quality: Int): ByteArray? {
+    internal fun encodeJpeg(
+        quality: Int,
+        compositor: EncodedOverlayCompositor? = null,
+        nowMs: Long = System.currentTimeMillis(),
+    ): ByteArray? {
         val retained = frame ?: return null
         return try {
-            val yuvImage = YuvImage(retained.nv21, ImageFormat.NV21, retained.width, retained.height, null)
-            val raw = ByteArrayOutputStream().also { out ->
-                yuvImage.compressToJpeg(Rect(0, 0, retained.width, retained.height), quality, out)
+            val prepared = prepareFrame(
+                retained.nv21,
+                retained.width,
+                retained.height,
+                retained.rotationDegrees,
+                compositor,
+                nowMs,
+            )
+            val yuvImage = YuvImage(prepared.nv21, ImageFormat.NV21, prepared.width, prepared.height, null)
+            ByteArrayOutputStream().also { out ->
+                yuvImage.compressToJpeg(Rect(0, 0, prepared.width, prepared.height), quality, out)
             }.toByteArray()
-            if (retained.rotationDegrees == 0) return raw
-            val bitmap = BitmapFactory.decodeByteArray(raw, 0, raw.size) ?: return null
-            val matrix = Matrix().apply { postRotate(retained.rotationDegrees.toFloat()) }
-            val rotated = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
-            val out = ByteArrayOutputStream()
-            rotated.compress(Bitmap.CompressFormat.JPEG, quality, out)
-            if (rotated !== bitmap) bitmap.recycle()
-            rotated.recycle()
-            out.toByteArray()
         } catch (_: Exception) {
             null
         }
@@ -64,5 +65,31 @@ class SnapshotFrameStore {
     companion object {
         /** Retention cadence: fresh enough for an event snapshot, ~free next to 30 fps. */
         private const val REFRESH_INTERVAL_MS = 1_000L
+
+        internal fun prepareFrame(
+            nv21: ByteArray,
+            width: Int,
+            height: Int,
+            rotation: Int,
+            compositor: EncodedOverlayCompositor?,
+            nowMs: Long,
+        ): PreparedSnapshotFrame {
+            val uprightWidth = if (rotation == 90 || rotation == 270) height else width
+            val uprightHeight = if (rotation == 90 || rotation == 270) width else height
+            val rotated = YuvConverter.rotateNv21(nv21, width, height, rotation)
+            // The retained frame belongs to the store across settings changes;
+            // stamping must never make an old mask part of its raw source.
+            val source = if (compositor != null && rotated === nv21) rotated.copyOf() else rotated
+            val stamped = compositor?.applyTo(
+                source,
+                uprightWidth,
+                uprightHeight,
+                nowMs,
+                frameShared = false,
+            ) ?: source
+            return PreparedSnapshotFrame(stamped, uprightWidth, uprightHeight)
+        }
     }
 }
+
+internal class PreparedSnapshotFrame(val nv21: ByteArray, val width: Int, val height: Int)

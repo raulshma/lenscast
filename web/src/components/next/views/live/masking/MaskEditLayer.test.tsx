@@ -342,6 +342,18 @@ describe('drawing', () => {
     expectRect(rectOf(list[1]), { x: 0.3, y: 0.2, width: 0.5, height: 0.5 })
   })
 
+  it('an armed draw starting inside an existing zone adds another zone instead of moving it', () => {
+    const { session, save } = mountEditor([zone('a')])
+    session.toggleDrawing()
+    drag([0.3, 0.3], [0.45, 0.45])
+
+    expect(session.zones()).toHaveLength(2)
+    expectRect(rectOf(session.zones()[0]), { x: 0.25, y: 0.25, width: 0.25, height: 0.25 })
+    expectRect(rectOf(session.zones()[1]), { x: 0.3, y: 0.3, width: 0.15, height: 0.15 })
+    expect(session.selectedId()).toBe(session.zones()[1].id)
+    expect(save.calls.at(-1)).toEqual(session.zones())
+  })
+
   it('a drag past the edge is clipped to the picture', () => {
     const { session } = mountEditor([])
     // 1.2 and 1.5 of the picture: off its right and bottom edges.

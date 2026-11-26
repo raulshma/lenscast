@@ -36,12 +36,13 @@ object StreamOverlayRenderer {
     ): Bitmap {
         if (!settings.enabled && !settings.maskingEnabled) return bitmap
 
+        val maskingActive = settings.maskingEnabled && settings.maskingZones.any { it.enabled }
         return try {
             val mutableBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, true)
             val canvas = Canvas(mutableBitmap)
 
-            if (settings.maskingEnabled && settings.maskingZones.isNotEmpty()) {
-                applyMaskingZones(canvas, bitmap, settings.maskingZones, bitmap.width, bitmap.height)
+            if (maskingActive) {
+                applyMaskingZones(canvas, mutableBitmap, settings.maskingZones, bitmap.width, bitmap.height)
             }
 
             if (settings.enabled) {
@@ -51,13 +52,14 @@ object StreamOverlayRenderer {
             mutableBitmap
         } catch (e: Exception) {
             Log.e(TAG, "Failed to apply overlay", e)
+            if (maskingActive) runCatching { bitmap.eraseColor(Color.BLACK) }
             bitmap
         }
     }
 
     private fun applyMaskingZones(
         canvas: Canvas,
-        sourceBitmap: Bitmap,
+        currentBitmap: Bitmap,
         zones: List<MaskingZone>,
         bitmapWidth: Int,
         bitmapHeight: Int,
@@ -80,11 +82,11 @@ object StreamOverlayRenderer {
                 }
 
                 MaskingType.PIXELATE -> {
-                    applyPixelate(canvas, sourceBitmap, left, top, right, bottom, zone.pixelateSize)
+                    applyPixelate(canvas, currentBitmap, left, top, right, bottom, zone.pixelateSize)
                 }
 
                 MaskingType.BLUR -> {
-                    applyBlur(canvas, sourceBitmap, left, top, right, bottom, zone.blurRadius)
+                    applyBlur(canvas, currentBitmap, left, top, right, bottom, zone.blurRadius)
                 }
             }
         }
@@ -92,7 +94,7 @@ object StreamOverlayRenderer {
 
     private fun applyPixelate(
         canvas: Canvas,
-        sourceBitmap: Bitmap,
+        currentBitmap: Bitmap,
         left: Int,
         top: Int,
         right: Int,
@@ -107,7 +109,7 @@ object StreamOverlayRenderer {
             OverlayLayoutPolicy.pixelateDownscale(regionWidth, regionHeight, pixelSize)
 
         try {
-            val regionBitmap = Bitmap.createBitmap(sourceBitmap, left, top, regionWidth, regionHeight)
+            val regionBitmap = Bitmap.createBitmap(currentBitmap, left, top, regionWidth, regionHeight)
             val scaledDown = Bitmap.createScaledBitmap(regionBitmap, smallWidth, smallHeight, false)
             val scaledUp = Bitmap.createScaledBitmap(scaledDown, regionWidth, regionHeight, false)
 
@@ -125,7 +127,7 @@ object StreamOverlayRenderer {
 
     private fun applyBlur(
         canvas: Canvas,
-        sourceBitmap: Bitmap,
+        currentBitmap: Bitmap,
         left: Int,
         top: Int,
         right: Int,
@@ -140,7 +142,7 @@ object StreamOverlayRenderer {
             OverlayLayoutPolicy.blurDownscale(regionWidth, regionHeight, radius)
 
         try {
-            val regionBitmap = Bitmap.createBitmap(sourceBitmap, left, top, regionWidth, regionHeight)
+            val regionBitmap = Bitmap.createBitmap(currentBitmap, left, top, regionWidth, regionHeight)
             val scaledDown = Bitmap.createScaledBitmap(regionBitmap, smallWidth, smallHeight, true)
             val scaledUp = Bitmap.createScaledBitmap(scaledDown, regionWidth, regionHeight, true)
 

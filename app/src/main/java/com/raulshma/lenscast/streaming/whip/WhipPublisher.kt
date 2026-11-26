@@ -5,6 +5,7 @@ import android.media.MediaRecorder
 import android.util.Log
 import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.core.YuvConverter
+import com.raulshma.lenscast.streaming.EncodedOverlayCompositor
 import com.raulshma.lenscast.streaming.FrameThrottle
 import com.raulshma.lenscast.streaming.FrameTiming
 import com.raulshma.lenscast.streaming.PublisherSession
@@ -74,7 +75,9 @@ internal interface WhipPublisherHandle {
  * Video frames arrive at the tap's native resolution and are never rescaled;
  * they are throttled to the stream's target fps ([setFrameRate]) and
  * rotated to upright with the same [YuvConverter.rotateNv21] the encoded
- * hub applies, so the wire always carries rotation-0 frames.
+ * hub applies. Privacy zones are applied only after that rotation, in the
+ * upright coordinates the editor uses, so the wire carries rotation-0,
+ * privacy-stamped frames.
  *
  * **Audio arbitration:** the publisher owns a dedicated AudioRecord (through
  * libwebrtc's [JavaAudioDeviceModule], 16 kHz mono, Opus at libwebrtc's
@@ -108,6 +111,7 @@ internal class WhipPublisher(
     /** The mic-arbitration verdict the manager computed for this session. */
     private val audioAllowed: Boolean,
     private val onStatus: (WhipStatus) -> Unit,
+    private val overlayCompositor: EncodedOverlayCompositor,
     private val httpClient: WhipHttpClient = HttpsWhipHttpClient(),
 ) : WhipPublisherHandle {
 
@@ -157,32 +161,8 @@ internal class WhipPublisher(
         val source = videoSource ?: return
         if (!frameThrottle.accept(System.currentTimeMillis())) return
 
-        // Rotate to upright (the encoded hub's rule), then hand libwebrtc a
-        // private copy at the tap's native size — never rescaled. The frame
-        // is not released here: NV21Buffer holds a Java reference and the
-        // native source drains it synchronously inside onFrameCaptured; GC
-        // reclaims the array (bounded by the fps throttle).
-        val upright: ByteArray
-        val upWidth: Int
-        val upHeight: Int
-        when (rotation) {
-            90, 270 -> {
-                upright = YuvConverter.rotateNv21(nv21, width, height, rotation)
-                upWidth = height
-                upHeight = width
-            }
-            180 -> {
-                upright = YuvConverter.rotateNv21(nv21, width, height, rotation)
-                upWidth = width
-                upHeight = height
-            }
-            else -> {
-                upright = nv21.copyOf()
-                upWidth = width
-                upHeight = height
-            }
-        }
-        val frame = VideoFrame(NV21Buffer(upright, upWidth, upHeight, null), 0, System.nanoTime())
+        val prepared = prepareFrame(nv21, width, height, rotation, overlayCompositor, System.currentTimeMillis())
+        val frame = VideoFrame(NV21Buffer(prepared.nv21, prepared.width, prepared.height, null), 0, System.nanoTime())
         source.capturerObserver.onFrameCaptured(frame)
     }
 
@@ -317,7 +297,40 @@ internal class WhipPublisher(
         )
     }
 
-    private companion object {
+    companion object {
+        /** Pure frame prep: rotate upright, then stamp masks/text into the private result. */
+        internal fun prepareFrame(
+            nv21: ByteArray,
+            width: Int,
+            height: Int,
+            rotation: Int,
+            compositor: EncodedOverlayCompositor,
+            nowMs: Long,
+        ): WhipFrame {
+            val upright: ByteArray
+            val upWidth: Int
+            val upHeight: Int
+            when (rotation) {
+                90, 270 -> {
+                    upright = YuvConverter.rotateNv21(nv21, width, height, rotation)
+                    upWidth = height
+                    upHeight = width
+                }
+                180 -> {
+                    upright = YuvConverter.rotateNv21(nv21, width, height, rotation)
+                    upWidth = width
+                    upHeight = height
+                }
+                else -> {
+                    upright = nv21.copyOf()
+                    upWidth = width
+                    upHeight = height
+                }
+            }
+            val stamped = compositor.applyTo(upright, upWidth, upHeight, nowMs, frameShared = false)
+            return WhipFrame(stamped, upWidth, upHeight)
+        }
+
         private const val TAG = "WhipPublisher"
 
         private const val VIDEO_TRACK_ID = "lenscast-video"
@@ -326,6 +339,9 @@ internal class WhipPublisher(
         private const val SESSION_WATCH_INTERVAL_MS = 1_000L
     }
 }
+
+/** The upright, privacy-stamped NV21 frame WHIP hands to libwebrtc. */
+internal class WhipFrame(val nv21: ByteArray, val width: Int, val height: Int)
 
 /**
  * The default signaling transport: `HttpsURLConnection` over the platform's

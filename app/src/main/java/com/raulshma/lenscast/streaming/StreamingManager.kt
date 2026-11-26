@@ -248,12 +248,13 @@ class StreamingManager(
     // construction (audio on only when the shared capture is free). Its
     // settle epilogue is the streaming-state mirror only — no hub refresh,
     // exactly what the WHIP scaffolding ran before the collapse.
+    private val whipOverlayCompositor = EncodedOverlayCompositor()
     private val whipOutput: WhipOutput = WhipOutput(
         audioAllowed = ::whipAudioAllowed,
         onStatusChanged = { status -> _whipStatus.value = status },
         onActiveChanged = { active -> _whipActive.value = active },
         publisherFactory = { url, token, stunServer, audioAllowed, onStatus ->
-            WhipPublisher(context, url, token, stunServer, audioAllowed, onStatus)
+            WhipPublisher(context, url, token, stunServer, audioAllowed, onStatus, whipOverlayCompositor)
         },
         // No settle epilogue: WHIP consumes no encoded hub (no refresh owed)
         // and the streaming-state mirror is derived from the active mirrors —
@@ -376,14 +377,15 @@ class StreamingManager(
 
     private var lastReportedClientCount = -1
 
-    // Detection-event snapshot source: the latest rendered M-JPEG frame,
-    // retained here because StreamingServer owns no latest-frame getter — the
-    // one frame DetectionCoordinator can reach without a fresh camera capture.
+    // Latest rendered M-JPEG frame for consumers that explicitly want the web
+    // output; detection snapshots use the retained raw frame below so current
+    // privacy settings are applied at encode time.
     @Volatile private var latestWebJpeg: ByteArray? = null
 
     // The no-viewer fallback for the same snapshot source: a retained camera
     // frame copied at ~1 Hz, encoded on demand when no M-JPEG frame exists.
     private val snapshotFrameStore = SnapshotFrameStore()
+    private val snapshotOverlayCompositor = EncodedOverlayCompositor()
 
     // ── Eco idle-fps mode (battery-powered idle sessions) ──
     // The persisted toggle arrives through [setEcoIdleFpsEnabled] (the
@@ -906,15 +908,15 @@ class StreamingManager(
     fun sirenController(): SirenPlayer = sirenPlayer
 
     /**
-     * The detection-event snapshot source: the newest rendered M-JPEG frame
-     * when a viewer is pulling one, else an on-demand encode from the
-     * retained snapshot frame ([SnapshotFrameStore]) — the pipeline no-ops
-     * with no M-JPEG viewer, and a headless event still deserves a snapshot.
-     * Null before the first camera frame.
+     * The detection-event snapshot source: the retained camera frame,
+     * privacy-stamped with the current settings and encoded on demand. Null
+     * before the first camera frame.
      */
     fun latestSnapshotJpeg(): ByteArray? =
-        latestWebJpeg ?: snapshotFrameStore.encodeJpeg(
+        snapshotFrameStore.encodeJpeg(
             com.raulshma.lenscast.core.StreamDefaults.SNAPSHOT_JPEG_QUALITY,
+            snapshotOverlayCompositor,
+            System.currentTimeMillis(),
         )
 
     /** Latest rendered M-JPEG frame for detection-event snapshots; null before the first frame. */
@@ -1867,11 +1869,13 @@ class StreamingManager(
 
     fun setOverlaySettings(settings: OverlaySettings) {
         currentOverlaySettings = settings
-        // The encoded path burns the same overlay into its shared encode
-        // (RTSP/HLS/WS/RTMP/SRT); the MJPEG path keeps reading the volatile
-        // per frame, and the WHEP tap stamps its own libwebrtc encode.
+        // Every output reads this same immutable snapshot: the shared encode
+        // (RTSP/HLS/WS/RTMP/SRT), MJPEG per frame, separate WHIP/WHEP taps,
+        // and retained detection-snapshot fallback.
         encodedHub.setOverlaySettings(settings)
         whepServer.setOverlaySettings(settings)
+        whipOverlayCompositor.setOverlaySettings(settings)
+        snapshotOverlayCompositor.setOverlaySettings(settings)
         Log.d(TAG, "Overlay settings updated: enabled=${settings.enabled}, position=${settings.position}")
     }
 

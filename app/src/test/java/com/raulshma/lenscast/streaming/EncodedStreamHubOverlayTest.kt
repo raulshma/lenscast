@@ -1,5 +1,6 @@
 package com.raulshma.lenscast.streaming
 
+import com.raulshma.lenscast.camera.model.MaskingZone
 import com.raulshma.lenscast.camera.model.OverlaySettings
 import com.raulshma.lenscast.core.YuvConverter
 import com.raulshma.lenscast.streaming.hls.HlsVideoSink
@@ -203,6 +204,29 @@ class EncodedStreamHubOverlayTest {
 
         assertEquals(1, mainEncoder.encodedFrames.size)
         assertSame(cameraFrame, mainEncoder.encodedFrames[0])
+    }
+
+    @Test
+    fun `masking stamps the main and sub encodes even with the text overlay off`() {
+        val mainEncoder = FakeVideoEncoder()
+        val subEncoder = FakeVideoEncoder()
+        val hub = hubWith(mainEncoder, subEncoder, EncodedOverlayCompositor(CountingRasterizer()))
+        hub.setVideoResolution(64, 64)
+        hub.setSubStreamEnabled(true)
+        hub.setOverlaySettings(
+            OverlaySettings(
+                enabled = false,
+                maskingEnabled = true,
+                maskingZones = listOf(MaskingZone(x = 0.25f, y = 0.25f, width = 0.25f, height = 0.25f)),
+            ),
+        )
+        val cameraFrame = ByteArray(64 * 64 * 3 / 2) { 80.toByte() }
+
+        hub.pushFrame(cameraFrame, 64, 64, rotation = 0)
+
+        assertEquals(0, mainEncoder.encodedFrames.single()[20 * 64 + 20].toInt() and 0xFF)
+        assertEquals(0, subEncoder.encodedFrames.single()[140 * 640 + 180].toInt() and 0xFF)
+        assertEquals(80, cameraFrame[20 * 64 + 20].toInt() and 0xFF)
     }
 
     @Test

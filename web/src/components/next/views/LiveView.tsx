@@ -84,6 +84,10 @@ export default function LiveView(props: { state: NextState }) {
       pushToast('warning', t('privacy.streamOffHint'))
       return
     }
+    // The shared settings flows replay their default-first placeholder until
+    // DataStore's first read lands. Opening now would seed an empty draft and
+    // let the first edit replace zones that are already saved on the device.
+    if (!state.settings()?.streaming) return
     // (1) The session reads the settings mirror, the focus zone and the
     // player rung once, at creation: none of those may re-run this effect.
     setMaskEditSession(untrack(() => createMaskEditSession(state)))
@@ -218,7 +222,9 @@ export default function LiveView(props: { state: NextState }) {
         />
       </Show>
       <ClientsPanel readOnly={state.isViewer} />
-      <MaskingQuickPanel state={state} />
+      <Show when={state.settings()?.streaming}>
+        <MaskingQuickPanel state={state} />
+      </Show>
       <SystemInfoPanel />
     </>
   )

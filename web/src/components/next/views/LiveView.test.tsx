@@ -56,7 +56,7 @@ function zone(id: string, overrides: Partial<MaskingZone> = {}): MaskingZone {
 const streamStatus = (on: boolean): DeviceStatus => ({ streaming: { webStreamingActive: on, isActive: on } }) as unknown as DeviceStatus
 
 /** A hand-built state with what LiveView and the session read; every write to the player rung is recorded in order. */
-function fixtureState(opts: { streamOn?: boolean; statusLoaded?: boolean; mode?: PlayerMode; zones?: MaskingZone[] } = {}) {
+function fixtureState(opts: { streamOn?: boolean; statusLoaded?: boolean; settingsLoaded?: boolean; mode?: PlayerMode; zones?: MaskingZone[] } = {}) {
   const doc = (zones: MaskingZone[]): AllSettings =>
     ({
       ...settingsFixture,
@@ -64,7 +64,7 @@ function fixtureState(opts: { streamOn?: boolean; statusLoaded?: boolean; mode?:
       // suite's subject, not these tests'.
       streaming: { ...settingsFixture.streaming, maskingZones: zones, maskingEnabled: true },
     }) as unknown as AllSettings
-  const [settings, setSettings] = createSignal<AllSettings | null>(doc(opts.zones ?? []))
+  const [settings, setSettings] = createSignal<AllSettings | null>(opts.settingsLoaded === false ? null : doc(opts.zones ?? []))
   const [status, setStatus] = createSignal<DeviceStatus | null>(opts.statusLoaded === false ? null : streamStatus(opts.streamOn ?? true))
   const [playerMode, writeMode] = createSignal<PlayerMode>(opts.mode ?? 'whep')
   const [showShortcuts, setShowShortcuts] = createSignal(false)
@@ -170,6 +170,23 @@ describe('LiveView — the masking edit is answered here, once', () => {
     expect(bar()).not.toBeNull()
     expect(column()!.querySelector('.nx-mask-inspector')).not.toBeNull()
     expect(done()).not.toBeNull()
+  })
+
+  it('waits for settings hydration so the first new zone cannot replace persisted zones', () => {
+    const { state, setSettings, modeWrites } = fixtureState({ settingsLoaded: false, zones: [zone('saved')] })
+    mountLive(state)
+    startMaskEdit()
+
+    expect(maskEditActive()).toBe(true)
+    expect(maskEditSession()).toBeNull()
+    expect(modeWrites).toEqual([])
+
+    setSettings({
+      ...settingsFixture,
+      streaming: { ...settingsFixture.streaming, maskingZones: [zone('saved')], maskingEnabled: true },
+    } as unknown as AllSettings)
+    expect(maskEditSession()?.zones()).toEqual([zone('saved')])
+    expect(modeWrites).toEqual(['mjpeg'])
   })
 
   it('nothing that changes under the edit makes a second session', () => {

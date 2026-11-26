@@ -419,15 +419,16 @@ H.264, `LCHC` + hvcC for HEVC) so legacy WS clients fail cleanly instead of
 misconfiguring a decoder (the shipped web player reads `LCCF` only; a
 Chromium-side hvcC path is future work).
 
-The frame path also stamps the configured stream overlay into every frame
-just before encode — the `EncodedOverlayCompositor` blends the same lines
-the MJPEG path renders into the NV21 array, so RTSP and every output riding
-this shared encode (HLS, WS video, RTMP, SRT) burn the timestamp in at the
-source (WHIP/WHEP encode separately and are not stamped). The blend never
-mutates the camera's own analysis array — when rotation and dimensions make
-the frame alias it, the compositor blends into a per-size reusable copy,
-because the MJPEG pipeline and the WHIP/WHEP taps still read that array
-after the fan-out. The sub-stream scales the ROTATED frame, not the
+The frame path also applies privacy masks and stamps the configured text
+overlay just before encode. `EncodedOverlayCompositor` paints zones in list
+order in the final output dimensions (after rotation and aspect-fill), then
+blends the same text lines the MJPEG path renders, so RTSP and every output
+riding this shared encode (HLS, WS video, RTMP, SRT) carry both. WHIP and WHEP
+encode separately but each owns a compositor fed by the same current settings.
+Masking never mutates the camera's own analysis array — when the target aliases
+it, the compositor paints into a per-size reusable copy, because the MJPEG
+pipeline and the WHIP/WHEP taps still read that array after the fan-out. The
+sub-stream scales the ROTATED frame, not the
 possibly re-scaled main frame: its dimensions move under `frameData`, and
 feeding the sub scale the stale source dims corrupted `/sub` whenever the
 encode resolution differed from the analysis resolution. The encoder
@@ -930,9 +931,14 @@ controller factory (signals, targeted `saveStreamingPatch` per gesture end
 the components there (`MaskEditLayer`, `MaskEditBar`, `MaskZoneInspector`,
 `MaskingQuickPanel`) are the picture and chrome skins. The draft lives
 locally so the settings poll cannot clobber it; a failed save toasts and
-the next commit retries. Zones paint only on the MJPEG web stream — RTSP,
-HLS, WHEP, recordings and captures stay unmasked — and manual percent
-entry survives as a collapsed fine-tune row in the inspector.
+the next commit retries. The editor mounts only after streaming settings have
+hydrated, so a default-first empty value cannot replace saved zones, and an
+armed draw owns presses over existing zones. Zones paint on MJPEG and every
+live encoded output (RTSP, HLS, WS video, RTMP, SRT, WHIP, WHEP and `/sub`),
+plus the retained detection-snapshot fallback. Native recordings, saved photos,
+on-device Preview and direct high-resolution captures use separate CameraX
+paths and remain unmasked. Manual percent entry survives as a collapsed
+fine-tune row in the inspector.
 
 ### Gallery Page
 **`streaming/web/GalleryPage.kt`** — the pure `/api/gallery` pagination:

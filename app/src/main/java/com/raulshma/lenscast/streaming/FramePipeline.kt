@@ -137,6 +137,12 @@ class FramePipeline(
 
             if (OverlayLayoutPolicy.overlayPassNeeded(frame.overlay)) {
                 val decoded = BitmapFactory.decodeByteArray(jpegData, 0, jpegData.size)
+                if (decoded == null && frame.overlay.maskingEnabled && frame.overlay.maskingZones.any { it.enabled }) {
+                    Log.e(TAG, "Cannot decode frame for privacy masking; dropping it")
+                    droppedFrameCount.incrementAndGet()
+                    publishCounters()
+                    return
+                }
                 if (decoded != null) {
                     val withOverlay = StreamOverlayRenderer.applyOverlay(decoded, frame.overlay, frame.clientCount)
                     if (withOverlay !== decoded) decoded.recycle()

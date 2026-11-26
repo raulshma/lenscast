@@ -1,5 +1,7 @@
 package com.raulshma.lenscast.streaming
 
+import com.raulshma.lenscast.camera.model.MaskingType
+import com.raulshma.lenscast.camera.model.MaskingZone
 import com.raulshma.lenscast.camera.model.OverlayPosition
 import com.raulshma.lenscast.camera.model.OverlaySettings
 import org.junit.Assert.assertArrayEquals
@@ -58,6 +60,93 @@ class EncodedOverlayCompositorTest {
         assertSame(frame, result)
         assertEquals(0, rasterizer.renderCount)
         assertArrayEquals(nv21Frame(64, 64), frame)
+    }
+
+    @Test
+    fun `masking works with the text overlay off and paints every enabled zone`() {
+        val compositor = EncodedOverlayCompositor(FakeRasterizer())
+        compositor.setOverlaySettings(
+            OverlaySettings(
+                enabled = false,
+                maskingEnabled = true,
+                maskingZones = listOf(
+                    MaskingZone(x = 0.25f, y = 0.25f, width = 0.25f, height = 0.25f),
+                    MaskingZone(x = 0.5f, y = 0.5f, width = 0.25f, height = 0.25f),
+                    MaskingZone(x = 0f, y = 0f, width = 0.1f, height = 0.1f, enabled = false),
+                ),
+            ),
+        )
+        val cameraFrame = nv21Frame(64, 64).also {
+            it.fill(100.toByte())
+            for (i in it.size / 2 until it.size) it[i] = 128.toByte()
+        }
+
+        val result = compositor.applyTo(cameraFrame, 64, 64, nowMs = 0, frameShared = true)
+
+        assertNotEquals(cameraFrame, result)
+        assertEquals(0, result[20 * 64 + 20].toInt() and 0xFF)
+        assertEquals(0, result[40 * 64 + 40].toInt() and 0xFF)
+        assertEquals(128, result[64 * 64 + 20 * 32 + 20].toInt() and 0xFF)
+        assertEquals(100, result[8 * 64 + 8].toInt() and 0xFF)
+        assertEquals(100, cameraFrame[20 * 64 + 20].toInt() and 0xFF)
+    }
+
+    @Test
+    fun `a later blur samples an earlier blackout instead of restoring raw pixels`() {
+        val compositor = EncodedOverlayCompositor(FakeRasterizer())
+        compositor.setOverlaySettings(
+            OverlaySettings(
+                enabled = false,
+                maskingEnabled = true,
+                maskingZones = listOf(
+                    MaskingZone(x = 0.25f, y = 0.25f, width = 0.5f, height = 0.5f),
+                    MaskingZone(
+                        type = MaskingType.BLUR,
+                        x = 0.25f,
+                        y = 0.25f,
+                        width = 0.5f,
+                        height = 0.5f,
+                        blurRadius = 20f,
+                    ),
+                ),
+            ),
+        )
+        val frame = nv21Frame(64, 64).also {
+            it.fill(100.toByte())
+            for (i in it.size / 2 until it.size) it[i] = 128.toByte()
+        }
+
+        compositor.applyTo(frame, 64, 64, nowMs = 0)
+
+        assertEquals(0, frame[40 * 64 + 40].toInt() and 0xFF)
+        assertEquals(128, frame[64 * 64 + 20 * 32 + 20].toInt() and 0xFF)
+    }
+
+    @Test
+    fun `pixelate paints reduced blocks inside the zone and leaves outside pixels alone`() {
+        val compositor = EncodedOverlayCompositor(FakeRasterizer())
+        compositor.setOverlaySettings(
+            OverlaySettings(
+                enabled = false,
+                maskingEnabled = true,
+                maskingZones = listOf(
+                    MaskingZone(
+                        type = MaskingType.PIXELATE,
+                        x = 0.25f,
+                        y = 0.25f,
+                        width = 0.5f,
+                        height = 0.5f,
+                        pixelateSize = 16,
+                    ),
+                ),
+            ),
+        )
+        val frame = ByteArray(64 * 64 * 3 / 2) { index -> (index % 251).toByte() }
+
+        compositor.applyTo(frame, 64, 64, nowMs = 0)
+
+        assertEquals(frame[16 * 64 + 16].toInt() and 0xFF, frame[31 * 64 + 31].toInt() and 0xFF)
+        assertEquals(18, frame[8 * 64 + 8].toInt() and 0xFF)
     }
 
     @Test
