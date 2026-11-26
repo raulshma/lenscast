@@ -439,7 +439,8 @@ export default function LiveView(props: {
             ariaLabel={columnCollapsed()
               ? t('next.inspector.expand')
               : t('next.inspector.collapse')}
-            title={columnCollapsed() ? t('next.inspector.expand') : t('next.inspector.collapse')}
+            tooltip={columnCollapsed() ? t('next.inspector.expand') : t('next.inspector.collapse')}
+            tooltipEdge='below'
             onClick={() => inspectorLayout().mutate(toggleColumnCollapsed)}
           >
             <IconChevronRight size={14} />
@@ -531,7 +532,7 @@ export default function LiveView(props: {
               type="button"
               class="nx-inspector-reopen"
               aria-label={t('next.inspector.expand')}
-              title={t('next.inspector.expand')}
+              data-tooltip={t('next.inspector.expand')}
               disabled={state.isViewer()}
               onClick={() => inspectorLayout().mutate(toggleColumnCollapsed)}
             >
@@ -566,7 +567,7 @@ export default function LiveView(props: {
           type="button"
           class="nx-inspector-fab"
           onClick={() => setDrawerOpen(true)}
-          title={t('next.inspector')}
+          data-tooltip={t('next.inspector')}
           aria-label={t('next.inspector')}
         >
           <IconSliders size={16} />

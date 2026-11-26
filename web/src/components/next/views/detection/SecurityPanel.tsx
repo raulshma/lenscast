@@ -348,7 +348,7 @@ export default function SecurityPanel(props: Props) {
                   ({zone.x.toFixed(2)}, {zone.y.toFixed(2)}) {zone.width.toFixed(2)}×{zone.height.toFixed(2)}
                 </span>
                 <div class="nx-zone-actions">
-                  <label class="nx-switch" title={t('security.enableZone')}>
+                  <label class="nx-switch" data-tooltip={t('security.enableZone')}>
                     <input
                       type="checkbox"
                       checked={zone.enabled}

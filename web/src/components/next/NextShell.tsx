@@ -185,7 +185,8 @@ export default function NextShell(props: Props) {
             type="button"
             class="nx-util-btn"
             onClick={toggleCompact}
-            title={compact() ? t('next.sidebar.expand') : t('next.sidebar.collapse')}
+            data-tooltip={compact() ? t('next.sidebar.expand') : t('next.sidebar.collapse')}
+            data-tooltip-edge='below'
             aria-label={compact() ? t('next.sidebar.expand') : t('next.sidebar.collapse')}
           >
             <Show when={compact()} fallback={<IconChevronLeft size={16} />}>
@@ -204,7 +205,8 @@ export default function NextShell(props: Props) {
                   class="nx-side-item"
                   classList={{ 'nx-side-item-active': view() === name }}
                   onClick={() => router.navigate({ name })}
-                  title={viewLabel(name)}
+                  data-tooltip={viewLabel(name)}
+                  data-tooltip-edge={compact() ? 'left' : undefined}
                 >
                   <Icon size={18} />
                   <span class="nx-side-item-label">{viewLabel(name)}</span>
@@ -275,7 +277,7 @@ export default function NextShell(props: Props) {
             type="button"
             class="nx-util-btn"
             onClick={toggleTheme}
-            title={theme() === 'dark' ? t('nav.theme.light') : t('nav.theme.dark')}
+            data-tooltip={theme() === 'dark' ? t('nav.theme.light') : t('nav.theme.dark')}
             aria-label={theme() === 'dark' ? t('nav.theme.light') : t('nav.theme.dark')}
           >
             <Show when={theme() === 'dark'} fallback={<IconMoon size={17} />}>
@@ -302,7 +304,7 @@ export default function NextShell(props: Props) {
             type="button"
             class="nx-util-btn nx-util-btn-shortcuts"
             onClick={() => state.setShowShortcuts(true)}
-            title={t('nav.shortcuts')}
+            data-tooltip={t('nav.shortcuts')}
             aria-label={t('nav.shortcuts')}
           >
             <IconKeyboard size={17} />
@@ -312,7 +314,7 @@ export default function NextShell(props: Props) {
             type="button"
             class="nx-util-btn"
             onClick={() => ui.set('classic')}
-            title={t('nav.exitNewUi')}
+            data-tooltip={t('nav.exitNewUi')}
             aria-label={t('nav.exitNewUi')}
           >
             <IconUndo size={17} />
@@ -323,7 +325,7 @@ export default function NextShell(props: Props) {
               type="button"
               class="nx-util-btn"
               onClick={state.handleLogout}
-              title={t('nav.logout')}
+              data-tooltip={t('nav.logout')}
               aria-label={t('nav.logout')}
             >
               <IconLogout size={17} />

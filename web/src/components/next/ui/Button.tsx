@@ -7,13 +7,17 @@ export type ButtonSize = 'sm' | 'md' | 'lg'
 interface Props {
   variant?: ButtonVariant
   size?: ButtonSize
-  /** Icon-only square; pair with `title`/`ariaLabel` for accessibility. */
+  /** Icon-only square; pair with `tooltip`/`ariaLabel` for accessibility. */
   icon?: boolean
   /** Shows a spinner and blocks the click while true. */
   loading?: boolean
   disabled?: boolean
   type?: 'button' | 'submit'
-  title?: string
+  /** Styled bubble text (data-tooltip); the kit never emits a native title. */
+  tooltip?: string
+  /** Bubble re-anchor (data-tooltip-edge): below for hosts at a clipping
+      container's top, left/right to keep end keys inside the frame. */
+  tooltipEdge?: 'below' | 'left' | 'right'
   ariaLabel?: string
   /** For on/off buttons (torch): lands as `aria-pressed`, undefined omits it. */
   ariaPressed?: boolean
@@ -47,7 +51,8 @@ export default function Button(props: Props) {
       }}
       disabled={props.disabled || props.loading}
       aria-busy={props.loading ? 'true' : undefined}
-      title={props.title}
+      data-tooltip={props.tooltip}
+      data-tooltip-edge={props.tooltipEdge}
       aria-label={props.ariaLabel}
       aria-pressed={props.ariaPressed}
       aria-expanded={props.ariaExpanded}

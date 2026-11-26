@@ -101,7 +101,7 @@ export default function ClientsPanel(props: { readOnly?: () => boolean } = {}) {
                       size="sm"
                       variant="danger-soft"
                       disabled={kicking() !== '' || readOnly()}
-                      title={readOnly() ? t('clients.readOnlyTitle') : undefined}
+                      tooltip={readOnly() ? t('clients.readOnlyTitle') : undefined}
                       onClick={() => void handleKick(id)}
                       ariaLabel={t('clients.kick')}
                     >

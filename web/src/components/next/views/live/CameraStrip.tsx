@@ -40,7 +40,7 @@ export default function CameraStrip(props: { state: NextState }) {
           class="nx-cam-strip-handle"
           onClick={cam.toggleCollapsed}
           aria-expanded={false}
-          title={t('cam.expand')}
+          data-tooltip={t('cam.expand')}
         >
           <span class="nx-mono">{zoomReadout(cam.zoomRatio())}</span>
           <IconChevronDown size={14} class="nx-cam-strip-chevron-flipped" />
@@ -54,7 +54,7 @@ export default function CameraStrip(props: { state: NextState }) {
             label={t('cam.zoomOut')}
             variant="ghost"
             disabled={locked()}
-            title={lockTitle() ?? t('cam.zoomOut')}
+            tooltip={lockTitle() ?? t('cam.zoomOut')}
             onClick={cam.zoomOut}
           >
             <IconMinus size={16} />
@@ -72,7 +72,7 @@ export default function CameraStrip(props: { state: NextState }) {
             label={t('cam.zoomIn')}
             variant="ghost"
             disabled={locked()}
-            title={lockTitle() ?? t('cam.zoomIn')}
+            tooltip={lockTitle() ?? t('cam.zoomIn')}
             onClick={cam.zoomIn}
           >
             <IconPlus size={16} />
@@ -83,7 +83,7 @@ export default function CameraStrip(props: { state: NextState }) {
             class="nx-chip"
             onClick={cam.resetWide}
             disabled={locked()}
-            title={lockTitle() ?? t('cam.wide')}
+            data-tooltip={lockTitle() ?? t('cam.wide')}
           >
             {t('cam.wide')}
           </button>
@@ -101,7 +101,7 @@ export default function CameraStrip(props: { state: NextState }) {
                   aria-pressed={lens.selected}
                   onClick={() => cam.selectLens(lens.index)}
                   disabled={locked()}
-                  title={lockTitle() ?? lensLabel(lens)}
+                  data-tooltip={lockTitle() ?? lensLabel(lens)}
                 >
                   {lensLabel(lens)}
                 </button>
@@ -116,7 +116,7 @@ export default function CameraStrip(props: { state: NextState }) {
             label={t('cam.exposureLower')}
             variant="ghost"
             disabled={locked()}
-            title={lockTitle() ?? t('cam.exposureLower')}
+            tooltip={lockTitle() ?? t('cam.exposureLower')}
             onClick={() => cam.stepExposure(-1)}
           >
             <IconMinus size={16} />
@@ -128,7 +128,7 @@ export default function CameraStrip(props: { state: NextState }) {
             label={t('cam.exposureRaise')}
             variant="ghost"
             disabled={locked()}
-            title={lockTitle() ?? t('cam.exposureRaise')}
+            tooltip={lockTitle() ?? t('cam.exposureRaise')}
             onClick={() => cam.stepExposure(1)}
           >
             <IconPlus size={16} />
@@ -163,7 +163,7 @@ export default function CameraStrip(props: { state: NextState }) {
           variant={cam.torchOn() ? 'toggled' : 'ghost'}
           ariaPressed={cam.torchOn()}
           disabled={locked()}
-          title={lockTitle() ?? t('preview.torchTitle')}
+          tooltip={lockTitle() ?? t('preview.torchTitle')}
           onClick={cam.toggleTorch}
         >
           <IconTorch size={16} />

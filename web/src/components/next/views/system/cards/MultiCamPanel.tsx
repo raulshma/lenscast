@@ -419,7 +419,7 @@ function CameraTile(props: {
               type="button"
               class="multicam-mini-btn"
               disabled={!!props.camera.auth || readOnly()}
-              title={props.camera.auth
+              data-tooltip={props.camera.auth
                 ? t('multicam.tile.authLive')
                 : mode() === 'snapshot' ? t('multicam.tile.toLive') : t('multicam.tile.toSnapshots')}
               onClick={toggleMode}
@@ -431,17 +431,17 @@ function CameraTile(props: {
               href={props.camera.baseUrl}
               target="_blank"
               rel="noopener noreferrer"
-              title={t('multicam.tile.dashboardTitle')}
+              data-tooltip={t('multicam.tile.dashboardTitle')}
             >
               {t('multicam.tile.dashboard')}
             </a>
-            <button type="button" class="multicam-mini-btn" title={t('multicam.tile.editTitle')} onClick={startEdit} disabled={readOnly()}>
+            <button type="button" class="multicam-mini-btn" data-tooltip={t('multicam.tile.editTitle')} onClick={startEdit} disabled={readOnly()}>
               {t('multicam.tile.edit')}
             </button>
             <button
               type="button"
               class="multicam-mini-btn multicam-mini-btn-danger"
-              title={t('multicam.tile.removeTitle')}
+              data-tooltip={t('multicam.tile.removeTitle')}
               disabled={readOnly()}
               onClick={() => { if (!readOnly()) props.onRemove(props.camera.id) }}
             >
@@ -570,7 +570,7 @@ export default function MultiCamPanel() {
             size="sm"
             variant="ghost"
             disabled={readOnly() || cameras().length === 0 || capturing()}
-            title={t('multicam.captureAllTitle')}
+            tooltip={t('multicam.captureAllTitle')}
             onClick={() => { if (!readOnly()) void captureAll() }}
           >
             {capturing() ? t('multicam.capturing') : t('multicam.captureAll')}
@@ -579,7 +579,7 @@ export default function MultiCamPanel() {
             size="sm"
             variant="ghost"
             disabled={readOnly() || cameras().length === 0}
-            title={t('multicam.toggleAllTitle')}
+            tooltip={t('multicam.toggleAllTitle')}
             onClick={() => { if (!readOnly()) update((current) => withMode(current, nextGlobalMode(current))) }}
           >
             {nextGlobalMode(cameras()) === 'live' ? t('multicam.liveAll') : t('multicam.snapshotsAll')}

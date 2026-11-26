@@ -107,7 +107,7 @@ export default function PrivacyMaskingPanel(props: Props) {
             size="sm"
             variant="primary"
             disabled={!props.streamActive() || readOnly()}
-            title={props.streamActive() ? t('privacy.editZoneTitle') : t('privacy.streamOffHint')}
+            tooltip={props.streamActive() ? t('privacy.editZoneTitle') : t('privacy.streamOffHint')}
             ariaLabel={t('privacy.editZoneTitle')}
             onClick={() => openEditor()}
           >
@@ -130,7 +130,7 @@ export default function PrivacyMaskingPanel(props: Props) {
                   variant="ghost"
                   icon
                   ariaLabel={zoneName(zone)}
-                  title={zoneName(zone)}
+                  tooltip={zoneName(zone)}
                   ariaExpanded={expandedZoneId() === zone.id}
                   onClick={() => toggleZoneExpanded(zone.id)}
                 >
@@ -157,7 +157,7 @@ export default function PrivacyMaskingPanel(props: Props) {
                   class="nx-privacy-zone-open"
                   variant="ghost"
                   disabled={!props.streamActive() || readOnly()}
-                  title={props.streamActive() ? t('privacy.editZoneTitle') : t('privacy.streamOffHint')}
+                  tooltip={props.streamActive() ? t('privacy.editZoneTitle') : t('privacy.streamOffHint')}
                   ariaLabel={`${zoneName(zone)} · ${t('privacy.editZoneTitle')}`}
                   onClick={() => openEditor(zone.id)}
                 >
@@ -173,7 +173,7 @@ export default function PrivacyMaskingPanel(props: Props) {
                   variant="danger-soft"
                   icon
                   disabled={readOnly()}
-                  title={t('privacy.removeZone')}
+                  tooltip={t('privacy.removeZone')}
                   ariaLabel={t('privacy.removeZone')}
                   onClick={() => removeZone(zone.id)}
                 >

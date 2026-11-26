@@ -197,7 +197,8 @@ export default function StreamPipHost(props: { state: NextState }) {
             class="nx-pip-btn nx-pip-btn-stop"
             onClick={() => { if (canStop()) state.handleStopWebStream() }}
             disabled={!canStop()}
-            title={t('next.pip.stop')}
+            data-tooltip={t('next.pip.stop')}
+            data-tooltip-edge='below'
             aria-label={t('next.pip.stop')}
           >
             <IconStop size={14} />
@@ -206,7 +207,8 @@ export default function StreamPipHost(props: { state: NextState }) {
             type="button"
             class="nx-pip-btn"
             onClick={expandToLive}
-            title={t('next.pip.expand')}
+            data-tooltip={t('next.pip.expand')}
+            data-tooltip-edge='below'
             aria-label={t('next.pip.expand')}
           >
             <IconExpand size={14} />
@@ -215,7 +217,8 @@ export default function StreamPipHost(props: { state: NextState }) {
             type="button"
             class="nx-pip-btn"
             onClick={() => dismissPip()}
-            title={t('next.pip.close')}
+            data-tooltip={t('next.pip.close')}
+            data-tooltip-edge='below'
             aria-label={t('next.pip.close')}
           >
             <IconClose size={14} />
@@ -229,7 +232,6 @@ export default function StreamPipHost(props: { state: NextState }) {
             class="nx-pip-tap"
             onClick={expandToLive}
             aria-label={t('next.pip.expand')}
-            title={t('next.pip.expand')}
           />
         </div>
       </div>

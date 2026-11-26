@@ -34,10 +34,47 @@ the domain from source.
 ./gradlew :wear:assembleDebug
 ```
 
+## Install on a connected device
+
+Devices connect over wireless adb (TLS pairing; `adb devices` lists them
+as `adb-<id>-….adb-tls-connect._tcp`). The store flavor is the default
+dev flavor (self-updater included), so one Gradle task builds the web UI
+into assets and installs on every connected device:
+
+```bash
+./gradlew :app:installStoreDebug
+```
+
+Verify what landed with
+`adb shell dumpsys package com.raulshma.lenscast | grep -E 'versionName|lastUpdate'`.
+
+Mind the versionCode scheme when filtering ABIs: the code is
+`major*10_000 + minor*1_000 + patch*10 + abiIndex` (armeabi-v7a 1,
+arm64-v8a 2, x86_64 3), and the Gradle literal is the x86_64 code. A
+plain build packages all three ABIs at that literal; passing
+`-PabiFilter=arm64-v8a` without `-PversionCode` computes one **below**
+it, so upgrading a device that already runs a plain local build is
+refused as a downgrade. Either pass both properties (as CI and the
+release workflows do), or install the built APK directly with the
+downgrade allowed — both builds are debug-signed from this machine, so
+app data survives:
+
+```bash
+adb install -r -d app/build/outputs/apk/store/debug/app-store-debug.apk
+```
+
 ## Test
 
 CI runs all of these on every PR and every push to `main`; a change is not
-done until they pass locally:
+done until they pass locally. Run the suites your change touches **before
+pushing**, not only at the end of a session: pushes to `main` land in
+batches and CI sees only the batch's head, so a suite broken by one commit
+stays invisible until some later push carries a fix. The JVM pair is the
+one that drifts quietly after web-only work:
+
+```bash
+./gradlew :app:testStoreDebugUnitTest :app:testFdroidDebugUnitTest
+```
 
 ```bash
 # Android JVM unit tests — both flavors

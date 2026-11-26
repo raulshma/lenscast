@@ -1898,6 +1898,33 @@ full-text buttons so the command ledge fits on one row; `'full'` expands all
 labels. Enabled via `compactActions` on `StreamPreview` from `StreamPipHost`
 so the classic shell and existing unit tests stay untouched.
 
+### Web UI Tooltip (data-tooltip)
+**`web/src/styles/next/tooltip.css`** — the beta console's one tooltip
+dialect, promoted from a preview-action-bar-only rule to every `[data-ui='next']`
+surface: a control speaks through the `data-tooltip` attribute and the bubble
+is the host's own `::after` (no DOM node, no JS), revealed on hover (pointer
+devices only, `:hover:not(:active)`) and on `:focus-visible` so a keyboard
+pass sees what the hand sees. The accessible name still comes from the
+`aria-label` the call site pairs with it. `data-tooltip-edge="below|left|right"`
+re-anchors the bubble where centered-above would clip — `below` for hosts at a
+clipping container's top (PiP chrome row, inspector column toggle, fullscreen
+exit), `left`/`right` for bar-end keys. The kit's `Button`/`IconButton`
+carry it through `tooltip`/`tooltipEdge` (`IconButton` defaults the bubble to
+its required `label`); the kit never emits a native `title`. Native `title`
+survives only where a bubble physically cannot render: the language
+`<select>` (form controls have no `::after`), self-clipping truncation hints
+on non-interactive text (ellipsis filenames, ids, timers), and the
+status-strip chips (`.nx-strip-chips` clips both ways). The machine-readable
+form of that exception list — and the JSX scan policing the plain-element
+half the compiler can't see — lives in
+`web/src/components/next/noNativeTitle.test.ts`. The host must be a
+containing block for the absolute `::after` — positioned classes already are,
+static ones add `position: relative` in their own rule, and tooltip.css
+deliberately forces no position so absolutely-placed hosts (zone rects, tile
+deletes, timeline segments) keep their placement. `StreamPreview`, shared
+with the classic shell, keeps both dialects through its `tipAttr`/`titleAttr`
+gates: beta gets `data-tooltip`, classic keeps the native `title`.
+
 ### Stream Watchdog
 **`core/StreamWatchdog.kt`** — monitors a live stream and performs recovery
 (hard restart choreography) when it stalls. Recovery re-attaches the environment

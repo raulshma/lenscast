@@ -9,7 +9,10 @@ interface Props {
   size?: ButtonSize
   loading?: boolean
   disabled?: boolean
-  title?: string
+  /** Styled bubble text; defaults to `label`. */
+  tooltip?: string
+  /** Bubble re-anchor; see `Button`. */
+  tooltipEdge?: 'below' | 'left' | 'right'
   ariaPressed?: boolean
   ariaExpanded?: boolean
   onClick?: (e: MouseEvent) => void
@@ -26,7 +29,8 @@ export default function IconButton(props: Props) {
       icon={true}
       loading={props.loading}
       disabled={props.disabled}
-      title={props.title ?? props.label}
+      tooltip={props.tooltip ?? props.label}
+      tooltipEdge={props.tooltipEdge}
       ariaLabel={props.label}
       ariaPressed={props.ariaPressed}
       ariaExpanded={props.ariaExpanded}

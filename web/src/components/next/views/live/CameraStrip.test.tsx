@@ -101,7 +101,7 @@ describe('nx camera strip', () => {
     const slider = document.querySelector('.nx-cam-strip .nx-slider') as HTMLInputElement
     expect(slider.disabled).toBe(true)
     const lockedButtons = [...document.querySelectorAll('.nx-cam-strip button')]
-      .filter((b) => (b as HTMLButtonElement).disabled && b.getAttribute('title') === 'Admin access required')
+      .filter((b) => (b as HTMLButtonElement).disabled && b.getAttribute('data-tooltip') === 'Admin access required')
     expect(lockedButtons.length).toBeGreaterThanOrEqual(5)
   })
 

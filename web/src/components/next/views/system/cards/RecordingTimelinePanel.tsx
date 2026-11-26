@@ -166,7 +166,7 @@ export default function RecordingTimelinePanel() {
             type="button"
             class="timeline-day-btn"
             onClick={() => changeDay(-1)}
-            title={t('timeline.prevDay')}
+            data-tooltip={t('timeline.prevDay')}
             aria-label={t('timeline.prevDay')}
           >
             <svg aria-hidden="true" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6" /></svg>
@@ -177,7 +177,7 @@ export default function RecordingTimelinePanel() {
             class="timeline-day-btn"
             onClick={() => changeDay(1)}
             disabled={day() === todayKey()}
-            title={t('timeline.nextDay')}
+            data-tooltip={t('timeline.nextDay')}
             aria-label={t('timeline.nextDay')}
           >
             <svg aria-hidden="true" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6" /></svg>
@@ -224,7 +224,7 @@ export default function RecordingTimelinePanel() {
                   class={`timeline-segment timeline-trigger-${seg.trigger} timeline-segment-link`}
                   onClick={() => openSegment(seg)}
                   style={segmentStyle(seg)}
-                  title={segmentTitle(seg)}
+                  data-tooltip={segmentTitle(seg)}
                 />
               </Show>
             )}

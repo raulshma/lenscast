@@ -273,7 +273,7 @@ export default function MediaView(props: { state: NextState }) {
                               <button
                                 type="button"
                                 class="nx-tile-delete"
-                                title={t('common.delete')}
+                                data-tooltip={t('common.delete')}
                                 aria-label={t('common.delete')}
                                 onClick={(e) => { e.stopPropagation(); deleteOne(item) }}
                               >

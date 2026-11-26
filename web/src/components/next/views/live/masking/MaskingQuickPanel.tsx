@@ -49,7 +49,7 @@ export default function MaskingQuickPanel(props: MaskingQuickPanelProps) {
               size="sm"
               variant="primary"
               disabled={!streamOn() || readOnly()}
-              title={streamOn() ? t('privacy.editZoneTitle') : t('privacy.streamOffHint')}
+              tooltip={streamOn() ? t('privacy.editZoneTitle') : t('privacy.streamOffHint')}
               ariaLabel={t('privacy.editZoneTitle')}
               onClick={() => { if (!readOnly()) startMaskEdit() }}
             >

@@ -90,6 +90,17 @@ describe('StreamPreview compact action bar (beta UI)', () => {
     expect(document.querySelector(`[data-tooltip="${en['preview.rtspStreamStopTitle']}"]`)).not.toBeNull()
   })
 
+  it('pins the bar-end bubbles inside the frame: first key left-aligned, toggle right-aligned', () => {
+    renderCompactPreview({ webActive: false, rtspActive: true })
+    // The bar's first key would push a centered bubble past the left edge;
+    // the trailing toggle would push one past the right. The old positional
+    // CSS now travels as data-tooltip-edge on the buttons themselves.
+    const first = document.querySelector('.preview-actions-left .action-btn')!
+    expect(first.getAttribute('data-tooltip-edge')).toBe('left')
+    const toggle = document.querySelector('.preview-actions-toggle')!
+    expect(toggle.getAttribute('data-tooltip-edge')).toBe('right')
+  })
+
   it('allows switching between compact icon buttons and full-text buttons and persists the choice', () => {
     renderCompactPreview()
     const bar = document.querySelector('.preview-actions')!

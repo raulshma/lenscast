@@ -621,7 +621,7 @@ describe('CustomSectionPanel masking editor', () => {
     status.streaming.webStreamingActive = false
     panel.setStatus(status)
     expect(button.disabled).toBe(true)
-    expect(button.title).toBe(en['privacy.streamOffHint'])
+    expect(button.getAttribute('data-tooltip')).toBe(en['privacy.streamOffHint'])
     expect(panel.row('masking.edit').textContent).toContain(en['privacy.streamOffHint'])
     fireEvent.click(button)
     expect(maskEditActive()).toBe(false)

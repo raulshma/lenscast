@@ -188,7 +188,7 @@ export default function EventLog(props: { readOnly?: () => boolean } = {}) {
                           type="button"
                           class="nx-log-clip"
                           onClick={() => openClip(event())}
-                          title={clipFileName(event()) ?? t('events.playClipTitle')}
+                          data-tooltip={clipFileName(event()) ?? t('events.playClipTitle')}
                         >
                           {t('events.viewClip')}
                         </button>

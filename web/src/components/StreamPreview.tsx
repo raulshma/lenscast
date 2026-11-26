@@ -134,17 +134,26 @@ async function tapPcm16(
 /**
  * One stream URL row's copy affordance: a one-tap clipboard button that
  * flips to a checkmark for a moment (the caller owns the `copied` state, so
- * the web and RTSP rows share one reset timer).
+ * the web and RTSP rows share one reset timer). The tooltip text follows the
+ * copy→copied flip; beta speaks data-tooltip (the gates come in as props),
+ * classic keeps the native title.
  */
-function UrlCopyButton(props: { copied: () => boolean; onCopy: () => void }) {
+function UrlCopyButton(props: {
+  copied: () => boolean
+  onCopy: () => void
+  tipAttr: (text: string) => string | undefined
+  titleAttr: (text: string) => string | undefined
+}) {
+  const label = () => (props.copied() ? t('preview.copied') : t('preview.copy'))
   return (
     <button
       type="button"
       class="url-copy-btn"
       classList={{ 'url-copy-btn-copied': props.copied() }}
       onClick={props.onCopy}
-      aria-label={props.copied() ? t('preview.copied') : t('preview.copy')}
-      title={props.copied() ? t('preview.copied') : t('preview.copy')}
+      aria-label={label()}
+      data-tooltip={props.tipAttr(label())}
+      title={props.titleAttr(label())}
     >
       <Show when={props.copied()} fallback={
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -872,7 +881,9 @@ export default function StreamPreview(props: Props) {
             type="button"
             class="preview-fullscreen-exit"
             onClick={fullscreen.exit}
-            title={t('preview.exitFullscreenTitle')}
+            data-tooltip={tipAttr(t('preview.exitFullscreenTitle'))}
+            data-tooltip-edge={tipAttr('below')}
+            title={titleAttr(t('preview.exitFullscreenTitle'))}
             aria-label={t('preview.exitFullscreen')}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -926,6 +937,7 @@ export default function StreamPreview(props: Props) {
             onClick={() => setPlayerMode(cyclePlayerMode(playerMode()))}
             disabled={props.gesturesLocked?.() === true}
             data-tooltip={tipAttr(t('preview.playerTitle', { mode: playerMode().toUpperCase(), next: cyclePlayerMode(playerMode()).toUpperCase() }))}
+            data-tooltip-edge={tipAttr('left')}
             aria-label={tipAttr(t('preview.playerTitle', { mode: playerMode().toUpperCase(), next: cyclePlayerMode(playerMode()).toUpperCase() }))}
             title={titleAttr(t('preview.playerTitle', { mode: playerMode().toUpperCase(), next: cyclePlayerMode(playerMode()).toUpperCase() }))}
           >
@@ -1190,6 +1202,7 @@ export default function StreamPreview(props: Props) {
               aria-pressed={!isCompactActions()}
               onClick={() => actionsMode.toggle()}
               data-tooltip={isCompactActions() ? t('preview.actions.showLabels') : t('preview.actions.compactButtons')}
+              data-tooltip-edge={tipAttr('right')}
               aria-label={isCompactActions() ? t('preview.actions.showLabels') : t('preview.actions.compactButtons')}
             >
               <Show
@@ -1247,6 +1260,8 @@ export default function StreamPreview(props: Props) {
           <UrlCopyButton
             copied={() => copiedUrl() === 'web'}
             onCopy={() => void copyUrl('web', st()!.streaming.url!)}
+            tipAttr={tipAttr}
+            titleAttr={titleAttr}
           />
         </div>
       </Show>
@@ -1258,6 +1273,8 @@ export default function StreamPreview(props: Props) {
           <UrlCopyButton
             copied={() => copiedUrl() === 'rtsp'}
             onCopy={() => void copyUrl('rtsp', st()!.streaming.rtspUrl!)}
+            tipAttr={tipAttr}
+            titleAttr={titleAttr}
           />
         </div>
       </Show>

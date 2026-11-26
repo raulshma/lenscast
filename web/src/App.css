@@ -2,6 +2,7 @@
 @import "./styles/next/tokens.css";
 @import "./styles/next/base.css";
 @import "./styles/next/components.css";
+@import "./styles/next/tooltip.css";
 @import "./styles/next/layout.css";
 @import "./styles/next/views/cards.css";
 @import "./styles/next/views/live.css";
@@ -1142,6 +1143,7 @@ html, body {
 }
 
 .url-copy-btn {
+  position: relative;
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;

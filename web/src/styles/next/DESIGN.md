@@ -86,6 +86,35 @@ hairlines are decorative seams only.
   empty (what belongs here + the one action), error (what broke + what
   to do), full.
 
+## Tooltips
+
+- The console speaks one tooltip dialect: **`data-tooltip`** — the
+  styled bubble (styles/next/tooltip.css) rendered by the host's own
+  `::after`. The kit's `Button`/`IconButton` carry it through the
+  `tooltip`/`tooltipEdge` props; `IconButton` defaults the bubble to
+  its required `label`. Never set a native `title` on a beta control.
+- The accessible name still comes from `aria-label` (icon-only
+  buttons must say what they do); the bubble is the visual echo, and
+  `:focus-visible` reveals it so a keyboard pass sees what the hand
+  sees. Hover shows on pointer devices only (`@media (hover: hover)`).
+- The host must be a containing block for the absolute `::after`:
+  positioned classes already are; static ones add `position: relative`
+  in their own rule. Nothing in tooltip.css forces position, so
+  absolutely-placed hosts (zone rects, tile deletes, timeline
+  segments) keep their placement.
+- Re-anchor with `data-tooltip-edge="below|left|right"` when the
+  default centered-above placement would clip: `below` for hosts at a
+  clipping container's top (PiP chrome row, inspector column toggle,
+  fullscreen exit), `left`/`right` to keep bar-end keys inside the
+  frame.
+- Native `title` survives only where a bubble physically cannot
+  render: the language `<select>` (form controls have no `::after`),
+  self-clipping truncation hints on non-interactive text (ellipsis
+  filenames, ids, timers), and the status-strip chips (clipped both
+  ways by `.nx-strip-chips`). A disabled button shows no tooltip of
+  any kind — an important reason stands on the row as text, not only
+  in the bubble.
+
 ## Progressive disclosure (the redesign's spine)
 
 1. **Decide what is news.** A value is news when it changed, when it

@@ -337,7 +337,7 @@ export default function AutomationPanel(props: Props) {
                   class="automation-rule-main"
                   onClick={() => editRule(rule)}
                   disabled={readOnly()}
-                  title={t('automation.editRuleAria')}
+                  data-tooltip={t('automation.editRuleAria')}
                 >
                   <span class="automation-rule-badge automation-badge-trigger" aria-hidden="true">
                     <AutomationIcon icon={triggerIcon(rule.triggerType)} />
@@ -431,7 +431,7 @@ export default function AutomationPanel(props: Props) {
 
               <div class="automation-rule-buttons">
                 <SettingItem id="automation.rules">
-                  <Button size="sm" variant="ghost" onClick={() => editRule(rule)} disabled={readOnly()} title={t('automation.editRuleAria')} ariaLabel={t('automation.editRuleAria')}>
+                  <Button size="sm" variant="ghost" onClick={() => editRule(rule)} disabled={readOnly()} tooltip={t('automation.editRuleAria')} ariaLabel={t('automation.editRuleAria')}>
                     {t('automation.edit')}
                   </Button>
                 </SettingItem>
@@ -444,7 +444,7 @@ export default function AutomationPanel(props: Props) {
                         variant="ghost"
                         onClick={() => runTest(rule)}
                         disabled={readOnly() || testing()}
-                        title={t('automation.testAria')}
+                        tooltip={t('automation.testAria')}
                         ariaLabel={t('automation.testAria')}
                       >
                         {t('automation.test')}
@@ -456,7 +456,7 @@ export default function AutomationPanel(props: Props) {
                       variant="primary"
                       onClick={restoreTest}
                       disabled={readOnly() || testing()}
-                      title={t('automation.restoreAria')}
+                      tooltip={t('automation.restoreAria')}
                       ariaLabel={t('automation.restoreAria')}
                     >
                       {t('automation.restore')}
@@ -465,10 +465,10 @@ export default function AutomationPanel(props: Props) {
                 </SettingItem>
                 <SettingItem id="automation.rules">
                   <>
-                    <Button size="sm" variant="ghost" onClick={() => duplicateRule(rule)} disabled={readOnly() || saving() || atRuleCap()} title={t('automation.duplicateRuleAria')} ariaLabel={t('automation.duplicateRuleAria')}>
+                    <Button size="sm" variant="ghost" onClick={() => duplicateRule(rule)} disabled={readOnly() || saving() || atRuleCap()} tooltip={t('automation.duplicateRuleAria')} ariaLabel={t('automation.duplicateRuleAria')}>
                       {t('automation.duplicate')}
                     </Button>
-                    <Button size="sm" variant="danger-soft" onClick={() => removeRule(rule)} disabled={readOnly() || saving()} title={t('automation.deleteRuleAria')} ariaLabel={t('automation.deleteRuleAria')}>
+                    <Button size="sm" variant="danger-soft" onClick={() => removeRule(rule)} disabled={readOnly() || saving()} tooltip={t('automation.deleteRuleAria')} ariaLabel={t('automation.deleteRuleAria')}>
                       {t('common.delete')}
                     </Button>
                   </>

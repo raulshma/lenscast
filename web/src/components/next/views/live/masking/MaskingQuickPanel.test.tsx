@@ -62,7 +62,9 @@ describe('MaskingQuickPanel', () => {
     const button = panel.editButton()!
     expect(button).not.toBeNull()
     expect(button.textContent).toBe(en['privacy.editZones'])
-    expect(button.getAttribute('title')).toBe(en['privacy.editZoneTitle'])
+    // The kit speaks the styled bubble (data-tooltip), never the native title.
+    expect(button.getAttribute('data-tooltip')).toBe(en['privacy.editZoneTitle'])
+    expect(button.hasAttribute('title')).toBe(false)
     expect(button.classList.contains('nx-btn-primary')).toBe(true)
     expect(panel.hint()).toBeNull()
   })
@@ -114,7 +116,7 @@ describe('MaskingQuickPanel', () => {
     const panel = mountPanel({ zones: [zone('a')], streamOn: false })
     const button = panel.editButton()!
     expect(button.disabled).toBe(true)
-    expect(button.getAttribute('title')).toBe(en['privacy.streamOffHint'])
+    expect(button.getAttribute('data-tooltip')).toBe(en['privacy.streamOffHint'])
     // The reason is on the row, not only in a tooltip.
     expect(panel.hint()).toBe(en['privacy.streamOffHint'])
     fireEvent.click(button)
@@ -135,6 +137,6 @@ describe('MaskingQuickPanel', () => {
     panel.setStatus(streamStatus(true))
     expect(panel.editButton()!.disabled).toBe(false)
     expect(panel.hint()).toBeNull()
-    expect(panel.editButton()!.getAttribute('title')).toBe(en['privacy.editZoneTitle'])
+    expect(panel.editButton()!.getAttribute('data-tooltip')).toBe(en['privacy.editZoneTitle'])
   })
 })

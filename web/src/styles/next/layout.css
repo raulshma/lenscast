@@ -337,7 +337,8 @@
 }
 
 /* ── Compact mode: user-toggled (persisted) at ≥1024px — a 56px
-   icon rail; titles live on the items' title tooltips. The collapse
+   icon rail; names live on the items' data-tooltip bubbles (the
+   styled tooltip, styles/next/tooltip.css). The collapse
    is instant: width never animates (DESIGN.md motion law). ────────── */
 
 .nx-shell-compact .nx-sidebar {
@@ -964,6 +965,7 @@
   }
 
   [data-ui='next'] .nx-inspector-collapsed .nx-inspector-reopen {
+    position: relative;
     display: flex;
     align-items: center;
     justify-content: center;

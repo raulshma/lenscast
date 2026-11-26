@@ -108,7 +108,8 @@ describe('PrivacyMaskingPanel — the way into the visual editor', () => {
     const button = panel.editZones()
     // Visible as the verb, named for what it does.
     expect(button.textContent).toBe(en['privacy.editZones'])
-    expect(button.getAttribute('title')).toBe(keyText)
+    expect(button.getAttribute('data-tooltip')).toBe(keyText)
+    expect(button.hasAttribute('title')).toBe(false)
     expect(button.classList.contains('nx-btn-primary')).toBe(true)
     expect(button.disabled).toBe(false)
     expect(panel.hint()).toBeNull()
@@ -175,7 +176,7 @@ describe('PrivacyMaskingPanel — the way into the visual editor', () => {
     for (const key of keys) {
       // The name on screen is the name announced (Label in Name).
       expect(key.getAttribute('aria-label')!.startsWith(key.querySelector('.nx-privacy-zone-name')!.textContent!)).toBe(true)
-      expect(key.getAttribute('title')).toBe(keyText)
+      expect(key.getAttribute('data-tooltip')).toBe(keyText)
     }
     // The zone's type travels with its name.
     expect(keys[0].querySelector('.nx-badge')!.textContent).toBe(en['option.mask.blackout'])
@@ -189,14 +190,14 @@ describe('PrivacyMaskingPanel — without the web stream', () => {
     const panel = mountPanel({ zones: [zone('a'), zone('b')], streamOn: false })
     const button = panel.editZones()
     expect(button.disabled).toBe(true)
-    expect(button.getAttribute('title')).toBe(streamOff)
+    expect(button.getAttribute('data-tooltip')).toBe(streamOff)
     // The reason is on the row, not only in a tooltip: a disabled button is
     // not one a keyboard or screen reader user can reach to hear it.
     expect(panel.hint()).toBe(streamOff)
     const keys = [panel.openKey('a', zoneName(1)), panel.openKey('b', zoneName(2))]
     for (const key of keys) {
       expect(key.disabled).toBe(true)
-      expect(key.getAttribute('title')).toBe(streamOff)
+      expect(key.getAttribute('data-tooltip')).toBe(streamOff)
     }
 
     // However the press arrives, nothing is armed and the panel is not left.
@@ -227,7 +228,7 @@ describe('PrivacyMaskingPanel — without the web stream', () => {
     expect(panel.editZones().disabled).toBe(false)
     expect(panel.openKey('a', zoneName(1)).disabled).toBe(false)
     expect(panel.hint()).toBeNull()
-    expect(panel.openKey('a', zoneName(1)).getAttribute('title')).toBe(keyText)
+    expect(panel.openKey('a', zoneName(1)).getAttribute('data-tooltip')).toBe(keyText)
     // Back with the stream, the key does its work again.
     fireEvent.click(panel.openKey('a', zoneName(1)))
     expect(maskEditFocusZoneId()).toBe('a')

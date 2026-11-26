@@ -1,0 +1,95 @@
+/* ══════════════════════════════════════════════════════════════════
+   NEXT UI — TOOLTIP (the console's one tooltip dialect)
+   A control speaks through data-tooltip: the text rides the
+   attribute, the bubble is the host's ::after — no DOM node, no JS —
+   and the accessible name still comes from the aria-label the call
+   site pairs with it. Shows on hover (pointer devices only) and on
+   :focus-visible, so a keyboard pass sees what the hand sees. The
+   native title survives only where a bubble physically cannot
+   render: the language <select> (form controls have no ::after),
+   self-clipping truncation hints on non-interactive text, and the
+   status-strip chips (clipped both ways by .nx-strip-chips).
+   The host must be a containing block for the absolute ::after —
+   positioned classes already are; static ones each carry
+   position: relative in their own rule. Nothing here forces
+   position, so absolutely-placed hosts (zone rects, tile deletes,
+   timeline segments) keep their placement.
+   ══════════════════════════════════════════════════════════════════ */
+
+[data-ui='next'] [data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  padding: 5px 9px;
+  background: var(--color-paper-2);
+  border: 1px solid var(--color-rule-2);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-overlay);
+  color: var(--color-ink);
+  font-family: var(--font-body);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  line-height: 1.3;
+  white-space: nowrap;
+  max-width: min(300px, 75vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  opacity: 0;
+  z-index: var(--z-tooltip);
+  transition:
+    opacity var(--dur-micro) var(--ease-out),
+    transform var(--dur-micro) var(--ease-out);
+}
+
+/* Edge re-anchors — hidden and shown states share the placement, so
+   each show rule below must repeat its edge's transform. */
+[data-ui='next'] [data-tooltip-edge='left']::after {
+  left: 0;
+  transform: translateY(4px);
+}
+
+[data-ui='next'] [data-tooltip-edge='right']::after {
+  left: auto;
+  right: 0;
+  transform: translateY(4px);
+}
+
+[data-ui='next'] [data-tooltip-edge='below']::after {
+  bottom: auto;
+  top: calc(100% + 8px);
+  transform: translateX(-50%) translateY(-4px);
+}
+
+/* Keyboard: focus reveals the same bubble the hand gets. */
+[data-ui='next'] [data-tooltip]:focus-visible::after {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+[data-ui='next'] [data-tooltip-edge='left']:focus-visible::after,
+[data-ui='next'] [data-tooltip-edge='right']:focus-visible::after {
+  transform: translateY(0);
+}
+
+[data-ui='next'] [data-tooltip-edge='below']:focus-visible::after {
+  transform: translateX(-50%) translateY(0);
+}
+
+@media (hover: hover) {
+  [data-ui='next'] [data-tooltip]:hover:not(:active)::after {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+
+  [data-ui='next'] [data-tooltip-edge='left']:hover:not(:active)::after,
+  [data-ui='next'] [data-tooltip-edge='right']:hover:not(:active)::after {
+    transform: translateY(0);
+  }
+
+  [data-ui='next'] [data-tooltip-edge='below']:hover:not(:active)::after {
+    transform: translateX(-50%) translateY(0);
+  }
+}

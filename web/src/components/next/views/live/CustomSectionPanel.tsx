@@ -795,7 +795,7 @@ export default function CustomSectionPanel(props: CustomSectionPanelProps) {
               size="sm"
               variant="secondary"
               disabled={locked()}
-              title={t('preview.captureTitle')}
+              tooltip={t('preview.captureTitle')}
               ariaLabel={t('preview.captureTitle')}
               onClick={captureSnapshot}
             >
@@ -883,7 +883,7 @@ export default function CustomSectionPanel(props: CustomSectionPanelProps) {
               size="sm"
               variant="primary"
               disabled={maskEditorDisabled()}
-              title={streamOn() ? t('privacy.editZoneTitle') : t('privacy.streamOffHint')}
+              tooltip={streamOn() ? t('privacy.editZoneTitle') : t('privacy.streamOffHint')}
               ariaLabel={t('privacy.editZoneTitle')}
               onClick={openMaskEditor}
             >
