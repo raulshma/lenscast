@@ -221,9 +221,6 @@ export default function InspectorConfigurator(props: Props) {
                   {(preset) => <option value={preset.id}>{preset.name}</option>}
                 </For>
               </select>
-              <Show when={props.layout.saving()}>
-                <span class="nx-inspector-saving" role="status">{t('next.inspector.configurator.saving')}</span>
-              </Show>
             </div>
             <Show when={!readOnly()}>
               <div class="nx-inspector-config-row">

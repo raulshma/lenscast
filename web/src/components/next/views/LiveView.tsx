@@ -16,6 +16,8 @@ import {
 import { registerStageSlot } from '../../../lib/pipStore'
 import { t } from '../../../lib/i18n'
 import { shortcutFor } from '../../../lib/shortcuts'
+import { inspectorSectionTitle } from './live/inspectorRegistry'
+import type { WebUiSectionPlacementDto } from '../../../types'
 import {
   endMaskEdit,
   maskEditActive,
@@ -23,7 +25,7 @@ import {
   setMaskEditSession,
 } from '../../../lib/maskEditStore'
 import { IconChevronLeft, IconChevronRight, IconSliders } from '../../icons'
-import { Button, Drawer, Skeleton, pushToast } from '../ui'
+import { Button, ConfirmDialog, Drawer, IconButton, Skeleton, pushToast } from '../ui'
 import InspectorConfigurator from '../InspectorConfigurator'
 import InspectorPanelFrame from '../ui/InspectorPanelFrame'
 import InspectorSectionContent from './live/InspectorSectionContent'
@@ -79,6 +81,29 @@ const FALLBACK_CONTROLLER: InspectorLayoutController = {
   flush: async () => {},
 }
 
+// ── The hide-section confirm's "don't ask again" ────────────────────
+// A per-browser UX choice about a dialog, never part of the synced
+// layout document — so it lives in localStorage beside the sidebar
+// preference, not in WebUiLayoutDto.
+const HIDE_CONFIRM_KEY = 'lenscast.nextInspectorHideConfirm'
+
+function readHideConfirmSkip(): boolean {
+  try {
+    return localStorage.getItem(HIDE_CONFIRM_KEY) === 'skip'
+  } catch {
+    return false
+  }
+}
+
+function writeHideConfirmSkip(skip: boolean): void {
+  try {
+    if (skip) localStorage.setItem(HIDE_CONFIRM_KEY, 'skip')
+    else localStorage.removeItem(HIDE_CONFIRM_KEY)
+  } catch {
+    /* private mode: the checkbox just won't persist */
+  }
+}
+
 export default function LiveView(props: {
   state: NextState
   inspectorLayout?: InspectorLayoutController
@@ -88,6 +113,10 @@ export default function LiveView(props: {
   const [drawerOpen, setDrawerOpen] = createSignal(false)
   const [configuratorOpen, setConfiguratorOpen] = createSignal(false)
   const [dragWidth, setDragWidth] = createSignal<number | null>(null)
+  // The section a hide click is waiting on, while the confirm is up; the
+  // checkbox's fresh-per-dialog state rides alongside.
+  const [pendingHide, setPendingHide] = createSignal<WebUiSectionPlacementDto | null>(null)
+  const [rememberHideSkip, setRememberHideSkip] = createSignal(false)
   let resizeStartX = 0
   let resizeStartWidth = 0
   let resizing = false
@@ -95,6 +124,31 @@ export default function LiveView(props: {
   function openConfigurator(): void {
     setDrawerOpen(false)
     setConfiguratorOpen(true)
+  }
+
+  /** The hide button's entry: skips the dialog once "don't ask again" was confirmed. */
+  function requestHide(section: WebUiSectionPlacementDto): void {
+    if (readHideConfirmSkip()) {
+      inspectorLayout().mutate((current) => toggleSectionVisibility(current, section.id))
+      return
+    }
+    setRememberHideSkip(false)
+    setPendingHide(section)
+  }
+
+  const pendingHideTitle = (): string => {
+    const section = pendingHide()
+    if (!section) return ''
+    return section.kind === 'custom'
+      ? section.customTitle || t('next.inspector.configurator.pinnedControls')
+      : section.customTitle || t(inspectorSectionTitle(section.sectionId))
+  }
+
+  function confirmHide(): void {
+    if (rememberHideSkip()) writeHideConfirmSkip(true)
+    const section = pendingHide()
+    setPendingHide(null)
+    if (section) inspectorLayout().mutate((current) => toggleSectionVisibility(current, section.id))
   }
 
   // The slot the persistent StreamPreview host re-parents into while this
@@ -181,11 +235,12 @@ export default function LiveView(props: {
 
   // The inspector Drawer belongs to the normal Live view. An edit that
   // starts while it is open closes it, so it is not standing there with the
-  // normal panels the moment the edit ends.
+  // normal panels the moment the edit ends. The hide-confirm rides along.
   createEffect(() => {
     if (editing()) {
       setDrawerOpen(false)
       setConfiguratorOpen(false)
+      setPendingHide(null)
     }
   })
 
@@ -348,14 +403,15 @@ export default function LiveView(props: {
           </For>
         </select>
         <Show when={!state.isViewer()}>
-          <Button
+          <IconButton
             size="sm"
             variant="secondary"
             class="nx-inspector-customize"
+            label={t('next.inspector.customize')}
             onClick={openConfigurator}
           >
-            {t('next.inspector.customize')}
-          </Button>
+            <IconSliders size={15} />
+          </IconButton>
           <Button
             size="sm"
             variant="ghost"
@@ -369,9 +425,6 @@ export default function LiveView(props: {
           >
             <IconChevronRight size={14} />
           </Button>
-        </Show>
-        <Show when={inspectorLayout().saving()}>
-          <span class="nx-inspector-saving" role="status">{t('next.inspector.configurator.saving')}</span>
         </Show>
       </header>
       <fieldset class="nx-inspector-panels" disabled={state.isViewer()}>
@@ -389,7 +442,7 @@ export default function LiveView(props: {
                   : () => inspectorLayout().mutate((current) => toggleSectionCollapsed(current, section.id))}
                 onHide={state.isViewer()
                   ? undefined
-                  : () => inspectorLayout().mutate((current) => toggleSectionVisibility(current, section.id))}
+                  : () => requestHide(section)}
                 emptyState={
                   <div class="nx-inspector-empty">
                     <span>{t('next.inspector.allHidden')}</span>
@@ -503,6 +556,21 @@ export default function LiveView(props: {
           onClose={() => setConfiguratorOpen(false)}
           state={state}
           layout={inspectorLayout()}
+        />
+
+        {/* Hiding a section from the inspector asks first; the checkbox can
+            remember the answer per browser. Confirm never hides while the
+            dialog is closed — the signal is both the open flag and the target. */}
+        <ConfirmDialog
+          open={pendingHide() !== null}
+          title={t('next.inspector.section.hideConfirmTitle', { title: pendingHideTitle() })}
+          message={t('next.inspector.section.hideConfirmMessage')}
+          confirmLabel={t('next.inspector.section.hide', { title: pendingHideTitle() })}
+          rememberLabel={t('next.inspector.section.hideConfirmRemember')}
+          rememberChecked={rememberHideSkip()}
+          onRememberChange={setRememberHideSkip}
+          onClose={() => setPendingHide(null)}
+          onConfirm={confirmHide}
         />
       </Show>
     </div>

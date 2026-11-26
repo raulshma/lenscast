@@ -926,6 +926,18 @@ to {
   color:var(--color-ink-2);
   line-height:1.5;
 }
+[data-ui='next'] .nx-confirm-remember {
+  display:flex;
+  align-items:center;
+  gap:var(--space-2xs);
+  margin:var(--space-2xs) var(--space-lg) 0;
+  font-size:var(--text-sm);
+  color:var(--color-ink-2);
+  cursor:pointer;
+}
+[data-ui='next'] .nx-confirm-remember input {
+  accent-color:var(--color-accent);
+}
 [data-ui='next'] .nx-confirm-actions {
   justify-content:flex-end;
   gap:var(--space-2xs);

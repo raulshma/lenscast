@@ -46,9 +46,30 @@ const { panel } = vi.hoisted(() => ({
 }))
 
 vi.mock('./live/ChannelMatrix', () => ({ default: panel('panel-channels') }))
-vi.mock('./live/StoragePanel', () => ({ default: panel('panel-storage') }))
-vi.mock('./live/ClientsPanel', () => ({ default: panel('panel-clients') }))
 vi.mock('./live/SystemInfoPanel', () => ({ default: panel('panel-system') }))
+// Storage and Clients keep their marked stand-in body, but render the real
+// Panel faceplate: the hide-confirm tests need the frame's header actions
+// (collapse/hide) that the context drives, and Panel is pure UI — no polls.
+vi.mock('./live/StoragePanel', async () => {
+  const Panel = (await import('../ui/Panel')).default
+  return {
+    default: () => (
+      <Panel title="Storage">
+        <div data-testid="panel-storage" />
+      </Panel>
+    ),
+  }
+})
+vi.mock('./live/ClientsPanel', async () => {
+  const Panel = (await import('../ui/Panel')).default
+  return {
+    default: () => (
+      <Panel title="Connected Clients">
+        <div data-testid="panel-clients" />
+      </Panel>
+    ),
+  }
+})
 vi.mock('../../../api/client', () => ({ saveStreamingPatch: vi.fn() }))
 
 function zone(id: string, overrides: Partial<MaskingZone> = {}): MaskingZone {
@@ -1177,5 +1198,93 @@ describe('LiveView — configurable inspector', () => {
     expect(screen.getByText(en['next.inspector.allHidden'])).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: en['next.inspector.configurator.configureItems'] }))
     expect(screen.getByRole('dialog', { name: en['next.inspector.configurator.title'] })).toBeTruthy()
+  })
+
+  it('keeps the head one compact row while a save runs: nothing renders to shift it', () => {
+    const { state } = fixtureState()
+    const { controller } = configuredLayout()
+    mountConfigured(state, { ...controller, saving: () => true })
+    const head = document.querySelector('.nx-inspector-head')
+    expect(head).not.toBeNull()
+    expect(head!.querySelector('[role="status"]')).toBeNull()
+    // The head is the select and the two icon buttons — one row, no wrap.
+    expect(head!.querySelectorAll('button')).toHaveLength(2)
+    expect(head!.querySelector('select')).not.toBeNull()
+  })
+
+  it('the column scrolls vertically and never horizontally, as written in layout.css', () => {
+    const css = readFileSync(resolve(process.cwd(), 'src/styles/next/layout.css'), 'utf8')
+    const inner = css.match(/\[data-ui='next'\] \.nx-inspector-inner \{[^}]*\}/)?.[0] ?? ''
+    expect(inner).toMatch(/overflow-x:\s*hidden;/)
+    expect(inner).toMatch(/overflow-y:\s*auto;/)
+    // The shiftable saving indicator is gone for good, everywhere.
+    expect(css).not.toContain('nx-inspector-saving')
+  })
+})
+
+describe('LiveView — hiding a section asks first', () => {
+  const HIDE_CONFIRM_KEY = 'lenscast.nextInspectorHideConfirm'
+  /** The registry's en titles for the sections these tests hide. */
+  const SECTION_TITLES: Record<string, string> = { storage: 'Storage', clients: 'Connected Clients' }
+  const hideButtonIn = (frame: HTMLElement): HTMLElement =>
+    within(frame).getByRole('button', {
+      name: en['next.inspector.section.hide'].replace('{title}', SECTION_TITLES[frame.getAttribute('data-section-id') ?? '']),
+    })
+  const storageFrame = () => column()!.querySelector<HTMLElement>('[data-section-id="storage"]')!
+  const clientsFrame = () => column()!.querySelector<HTMLElement>('[data-section-id="clients"]')!
+
+  beforeEach(() => {
+    localStorage.removeItem(HIDE_CONFIRM_KEY)
+  })
+
+  it('the minus button opens a confirm, and only confirming hides the section', () => {
+    const { state } = fixtureState()
+    const { layout, controller } = configuredLayout()
+    mountConfigured(state, controller)
+    fireEvent.click(hideButtonIn(storageFrame()))
+    const dialog = screen.getByRole('alertdialog', {
+      name: en['next.inspector.section.hideConfirmTitle'].replace('{title}', 'Storage'),
+    })
+    expect(storageFrame()).not.toBeNull()
+    expect(layout().sections.find((section) => section.sectionId === 'storage')!.visible).toBe(true)
+    fireEvent.click(within(dialog).getByRole('button', {
+      name: en['next.inspector.section.hide'].replace('{title}', 'Storage'),
+    }))
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect(layout().sections.find((section) => section.sectionId === 'storage')!.visible).toBe(false)
+    expect(storageFrame()).toBeNull()
+  })
+
+  it('cancel answers the dialog and keeps the section', () => {
+    const { state } = fixtureState()
+    const { layout, controller } = configuredLayout()
+    mountConfigured(state, controller)
+    fireEvent.click(hideButtonIn(storageFrame()))
+    const dialog = screen.getByRole('alertdialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: en['common.cancel'] }))
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect(layout().sections.find((section) => section.sectionId === 'storage')!.visible).toBe(true)
+    expect(storageFrame()).not.toBeNull()
+  })
+
+  it('remember stores the skip in this browser, and the next hide needs no dialog', () => {
+    const { state } = fixtureState()
+    const { controller } = configuredLayout()
+    mountConfigured(state, controller)
+    fireEvent.click(hideButtonIn(storageFrame()))
+    const dialog = screen.getByRole('alertdialog')
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: en['next.inspector.section.hideConfirmRemember'] }))
+    fireEvent.click(within(dialog).getByRole('button', {
+      name: en['next.inspector.section.hide'].replace('{title}', 'Storage'),
+    }))
+    expect(localStorage.getItem(HIDE_CONFIRM_KEY)).toBe('skip')
+    expect(storageFrame()).toBeNull()
+
+    // Same mount, second section: the answer is remembered, the dialog never
+    // comes up, and the skip stays a per-browser flag, not layout data.
+    fireEvent.click(hideButtonIn(clientsFrame()))
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect(clientsFrame()).toBeNull()
+    expect(controller.layout().sections.find((section) => section.sectionId === 'clients')!.visible).toBe(false)
   })
 })

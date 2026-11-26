@@ -22,6 +22,15 @@ interface Props {
    */
   alternativeLabel?: string
   onAlternative?: () => void
+  /**
+   * An optional "remember this choice" checkbox (the inspector's don't-ask-
+   * again for section hiding): rendered between the message and the actions
+   * when a label is given. The dialog only displays the state — persisting
+   * the choice belongs to the confirm handler.
+   */
+  rememberLabel?: string
+  rememberChecked?: boolean
+  onRememberChange?: (checked: boolean) => void
   onConfirm: () => void
   onClose: () => void
 }
@@ -86,6 +95,16 @@ export default function ConfirmDialog(props: Props) {
             <span class="nx-confirm-title">{props.title}</span>
             <span class="nx-confirm-message">{props.message}</span>
           </div>
+          <Show when={props.rememberLabel}>
+            <label class="nx-confirm-remember">
+              <input
+                type="checkbox"
+                checked={props.rememberChecked === true}
+                onChange={(e) => props.onRememberChange?.(e.currentTarget.checked)}
+              />
+              <span>{props.rememberLabel}</span>
+            </label>
+          </Show>
           <div class="nx-confirm-actions">
             <Button variant="secondary" disabled={props.busy} onClick={props.onClose}>
               {props.cancelLabel ?? t('common.cancel')}

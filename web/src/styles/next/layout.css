@@ -702,6 +702,10 @@
   width: 100%;
   min-height: 0;
   height: 100%;
+  /* Vertical scrolls; horizontal never — the sticky head's edge-to-edge
+     negative margins overflow by the column padding, and any panel that
+     momentarily outgrows the column clips instead of h-scrolling. */
+  overflow-x: hidden;
   overflow-y: auto;
   scrollbar-gutter: stable;
 }
@@ -719,20 +723,14 @@
   border-bottom: 1px solid var(--color-rule);
 }
 
+/* One row, whatever the column width: the preset select takes what is
+   left (native ellipsis), and the customize/collapse pair stays
+   icon-sized — the console's standard control heights. */
 [data-ui='next'] .nx-inspector-preset {
   flex: 1;
   min-width: 0;
   width: auto;
-}
-
-[data-ui='next'] .nx-inspector-head .nx-btn-sm,
-[data-ui='next'] .nx-inspector-head .nx-select,
-[data-ui='next'] .nx-inspector-empty .nx-btn-sm {
-  min-height: 44px;
-}
-
-[data-ui='next'] .nx-inspector-customize {
-  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 [data-ui='next'] .nx-inspector-panels {
@@ -768,6 +766,13 @@
   min-height: 44px;
 }
 
+/* Between the stacked-below-380px column and the widest preset, a field
+   row that cannot fit wraps its control under the label instead of
+   widening the column. */
+[data-ui='next'] .nx-inspector .nx-field-row {
+  flex-wrap: wrap;
+}
+
 [data-ui='next'] .nx-inspector-reopen {
   display: none;
 }
@@ -791,12 +796,6 @@
 
 [data-ui='next'] .nx-inspector-resizer[aria-disabled='true'] {
   cursor: default;
-}
-
-[data-ui='next'] .nx-inspector-saving {
-  color: var(--color-muted);
-  font-size: var(--text-xs);
-  white-space: nowrap;
 }
 
 [data-ui='next'] .nx-inspector-empty {
@@ -852,22 +851,12 @@
 }
 
 @container (max-width: 380px) {
-  [data-ui='next'] .nx-inspector-head {
-    flex-wrap: wrap;
-  }
-
-  [data-ui='next'] .nx-inspector-preset {
-    flex-basis: calc(100% - 90px);
-  }
-
-  [data-ui='next'] .nx-inspector-saving {
-    flex-basis: 100%;
-  }
-
   [data-ui='next'] .nx-inspector .nx-panel-body {
     padding: var(--space-sm);
   }
 
+  /* Field rows answer the narrow column before anything overflows it:
+     stacked, and every control full-width. */
   [data-ui='next'] .nx-inspector .nx-field-row {
     align-items: stretch;
     flex-direction: column;
