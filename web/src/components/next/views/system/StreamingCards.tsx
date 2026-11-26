@@ -4,6 +4,7 @@ import { API_DEFAULTS } from '../../../../api/defaults'
 import { t } from '../../../../lib/i18n'
 import { streamToggle } from '../../../../lib/streamToggle'
 import { Panel, ToggleField, SliderField, FieldRow, Select, Led, TextInput } from '../../ui'
+import { SettingItem, useInspectorSection } from '../../ui/SettingItem'
 
 // The five inline streaming/audio/https/rtsp/keep-awake cards, ported onto
 // the next UI's component kit. Same exports, same props, same bindings —
@@ -19,11 +20,25 @@ export interface StreamingCardProps {
 }
 
 function useToggles(props: StreamingCardProps) {
+  const inspector = useInspectorSection()
+  const readOnly = () => inspector?.readOnly() === true
   const s = () => props.settings()
   const streaming = () => s()?.streaming
-  const save = (patch: Partial<AllSettings['streaming']>) => props.updateStreamingAndSave(patch)
+  const save = (patch: Partial<AllSettings['streaming']>) => {
+    if (!readOnly()) props.updateStreamingAndSave(patch)
+  }
+  const saveDebounced = (patch: Partial<AllSettings['streaming']>) => {
+    if (!readOnly()) props.updateStreamingDebounced(patch)
+  }
+  const setRecordingAudio = (enabled: boolean) => {
+    if (!readOnly()) props.setRecordingConfigAudio(enabled)
+  }
   return {
     s,
+    readOnly,
+    save,
+    saveDebounced,
+    setRecordingAudio,
     adaptiveBitrate: streamToggle(streaming, 'adaptiveBitrateEnabled', save),
     adaptiveEncoded: streamToggle(streaming, 'adaptiveEncodedBitrateEnabled', save),
     mdns: streamToggle(streaming, 'mdnsEnabled', save),
@@ -38,70 +53,83 @@ function useToggles(props: StreamingCardProps) {
 }
 
 export function WebStreamCard(props: StreamingCardProps) {
-  const { s, adaptiveBitrate, adaptiveEncoded, mdns, onvif } = useToggles(props)
+  const { s, readOnly, save, saveDebounced, adaptiveBitrate, adaptiveEncoded, mdns, onvif } = useToggles(props)
   const webStreamingEnabled = () => s()?.streaming?.webStreamingEnabled ?? API_DEFAULTS.webStreamingEnabled
 
   return (
     <Panel title={t('webstream.title')} badge={<Led tone={webStreamingEnabled() ? 'ok' : 'off'} />}>
-      <ToggleField
-        label={t('webstream.enable')}
-        hint={t('webstream.independent')}
-        checked={webStreamingEnabled()}
-        onChange={() => props.updateStreamingAndSave({ webStreamingEnabled: !webStreamingEnabled() })}
-      />
+      <SettingItem id="streaming.webEnabled">
+        <ToggleField
+          label={t('webstream.enable')}
+          hint={t('webstream.independent')}
+          checked={webStreamingEnabled()}
+          disabled={readOnly()}
+          onChange={() => save({ webStreamingEnabled: !webStreamingEnabled() })}
+        />
+      </SettingItem>
 
       {/* Shared stream tier across Web (MJPEG, WHEP, HLS, WS), RTSP, WHIP,
           and RTMP — keep accessible even when RTSP or Web Stream is off. */}
-      <FieldRow label={t('webstream.resolution')} hint={t('webstream.resolutionHint')}>
-        <Select
-          value={s()?.streaming?.rtspResolution ?? API_DEFAULTS.rtspResolution}
-          options={[
-            { value: '480p', label: '480p (4:3)' },
-            { value: '720p', label: '720p' },
-            { value: '720p43', label: '720p (4:3)' },
-            { value: '1080p', label: '1080p' },
-            { value: '1080p43', label: '1080p (4:3)' },
-          ]}
-          onChange={(v) => props.updateStreamingAndSave({ rtspResolution: v as RtspResolution })}
-          ariaLabel={t('webstream.resolution')}
+      <SettingItem id="streaming.resolution">
+        <FieldRow label={t('webstream.resolution')} hint={t('webstream.resolutionHint')}>
+          <Select
+            value={s()?.streaming?.rtspResolution ?? API_DEFAULTS.rtspResolution}
+            options={[
+              { value: '480p', label: '480p (4:3)' },
+              { value: '720p', label: '720p' },
+              { value: '720p43', label: '720p (4:3)' },
+              { value: '1080p', label: '1080p' },
+              { value: '1080p43', label: '1080p (4:3)' },
+            ]}
+            disabled={readOnly()}
+            onChange={(v) => save({ rtspResolution: v as RtspResolution })}
+            ariaLabel={t('webstream.resolution')}
+          />
+        </FieldRow>
+      </SettingItem>
+
+      <SettingItem id="streaming.webQuality">
+        <SliderField
+          label={t('webstream.jpegQuality')}
+          display={`${s()?.streaming?.jpegQuality ?? API_DEFAULTS.jpegQuality}%`}
+          min={API_DEFAULTS.jpegQualityMin}
+          max={API_DEFAULTS.jpegQualityMax}
+          step={5}
+          disabled={!webStreamingEnabled() || readOnly()}
+          value={s()?.streaming?.jpegQuality ?? API_DEFAULTS.jpegQuality}
+          onChange={(v) => saveDebounced({ jpegQuality: v })}
         />
-      </FieldRow>
+      </SettingItem>
 
-      <SliderField
-        label={t('webstream.jpegQuality')}
-        display={`${s()?.streaming?.jpegQuality ?? API_DEFAULTS.jpegQuality}%`}
-        min={API_DEFAULTS.jpegQualityMin}
-        max={API_DEFAULTS.jpegQualityMax}
-        step={5}
-        disabled={!webStreamingEnabled()}
-        value={s()?.streaming?.jpegQuality ?? API_DEFAULTS.jpegQuality}
-        onChange={(v) => props.updateStreamingDebounced({ jpegQuality: v })}
-      />
-
-      <ToggleField
-        label={t('webstream.adaptive')}
-        hint={t('webstream.adaptiveDesc')}
-        checked={adaptiveBitrate.checked()}
-        onChange={adaptiveBitrate.onToggle}
-      />
+      <SettingItem id="streaming.adaptiveBitrate">
+        <ToggleField
+          label={t('webstream.adaptive')}
+          hint={t('webstream.adaptiveDesc')}
+          checked={adaptiveBitrate.checked()}
+          disabled={readOnly()}
+          onChange={adaptiveBitrate.onToggle}
+        />
+      </SettingItem>
       <ToggleField
         label={t('webstream.adaptiveEncoded')}
         hint={t('webstream.adaptiveEncodedDesc')}
         checked={adaptiveEncoded.checked()}
+        disabled={readOnly()}
         onChange={adaptiveEncoded.onToggle}
       />
 
       <ToggleField
         label={t('webstream.showPreview')}
         checked={s()?.streaming?.showPreview ?? API_DEFAULTS.showPreview}
-        disabled={!webStreamingEnabled()}
-        onChange={() => props.updateStreamingAndSave({ showPreview: !(s()?.streaming?.showPreview ?? API_DEFAULTS.showPreview) })}
+        disabled={!webStreamingEnabled() || readOnly()}
+        onChange={() => save({ showPreview: !(s()?.streaming?.showPreview ?? API_DEFAULTS.showPreview) })}
       />
 
       <ToggleField
         label={t('webstream.mdns')}
         hint={t('webstream.mdnsDesc')}
         checked={mdns.checked()}
+        disabled={readOnly()}
         onChange={mdns.onToggle}
       />
 
@@ -109,6 +137,7 @@ export function WebStreamCard(props: StreamingCardProps) {
         label={t('webstream.onvif')}
         hint={t('webstream.onvifDesc')}
         checked={onvif.checked()}
+        disabled={readOnly()}
         onChange={onvif.onToggle}
       />
     </Panel>
@@ -116,23 +145,25 @@ export function WebStreamCard(props: StreamingCardProps) {
 }
 
 export function AudioCard(props: StreamingCardProps) {
-  const { s, mediaEncryption } = useToggles(props)
+  const { s, readOnly, save, saveDebounced, setRecordingAudio, mediaEncryption } = useToggles(props)
   const webStreamingEnabled = () => s()?.streaming?.webStreamingEnabled ?? API_DEFAULTS.webStreamingEnabled
 
   return (
     <Panel title={t('audio.title')}>
-      <ToggleField
-        label={t('audio.includeLive')}
-        checked={s()?.streaming?.streamAudioEnabled ?? API_DEFAULTS.streamAudioEnabled}
-        disabled={!webStreamingEnabled()}
-        onChange={() => props.updateStreamingAndSave({ streamAudioEnabled: !(s()?.streaming?.streamAudioEnabled ?? API_DEFAULTS.streamAudioEnabled) })}
-      />
+      <SettingItem id="streaming.audioEnabled">
+        <ToggleField
+          label={t('audio.includeLive')}
+          checked={s()?.streaming?.streamAudioEnabled ?? API_DEFAULTS.streamAudioEnabled}
+          disabled={!webStreamingEnabled() || readOnly()}
+          onChange={() => save({ streamAudioEnabled: !(s()?.streaming?.streamAudioEnabled ?? API_DEFAULTS.streamAudioEnabled) })}
+        />
+      </SettingItem>
 
       <ToggleField
         label={t('audio.echo')}
         checked={s()?.streaming?.streamAudioEchoCancellation ?? API_DEFAULTS.streamAudioEchoCancellation}
-        disabled={!webStreamingEnabled()}
-        onChange={() => props.updateStreamingAndSave({ streamAudioEchoCancellation: !(s()?.streaming?.streamAudioEchoCancellation ?? API_DEFAULTS.streamAudioEchoCancellation) })}
+        disabled={!webStreamingEnabled() || readOnly()}
+        onChange={() => save({ streamAudioEchoCancellation: !(s()?.streaming?.streamAudioEchoCancellation ?? API_DEFAULTS.streamAudioEchoCancellation) })}
       />
 
       <SliderField
@@ -141,9 +172,9 @@ export function AudioCard(props: StreamingCardProps) {
         min={API_DEFAULTS.audioBitrateMinKbps}
         max={API_DEFAULTS.audioBitrateMaxKbps}
         step={16}
-        disabled={!webStreamingEnabled()}
+        disabled={!webStreamingEnabled() || readOnly()}
         value={s()?.streaming?.streamAudioBitrateKbps ?? API_DEFAULTS.streamAudioBitrateKbps}
-        onChange={(v) => props.updateStreamingDebounced({ streamAudioBitrateKbps: v })}
+        onChange={(v) => saveDebounced({ streamAudioBitrateKbps: v })}
       />
 
       <FieldRow label={t('audio.channels')}>
@@ -153,8 +184,8 @@ export function AudioCard(props: StreamingCardProps) {
             { value: '1', label: t('audio.mono') },
             { value: '2', label: t('audio.stereo') },
           ]}
-          disabled={!webStreamingEnabled()}
-          onChange={(v) => props.updateStreamingAndSave({ streamAudioChannels: parseInt(v) })}
+          disabled={!webStreamingEnabled() || readOnly()}
+          onChange={(v) => save({ streamAudioChannels: parseInt(v) })}
           ariaLabel={t('audio.channels')}
         />
       </FieldRow>
@@ -162,10 +193,11 @@ export function AudioCard(props: StreamingCardProps) {
       <ToggleField
         label={t('audio.includeRecordings')}
         checked={s()?.streaming?.recordingAudioEnabled ?? API_DEFAULTS.recordingAudioEnabled}
+        disabled={readOnly()}
         onChange={() => {
           const newVal = !(s()?.streaming?.recordingAudioEnabled ?? API_DEFAULTS.recordingAudioEnabled)
-          props.updateStreamingAndSave({ recordingAudioEnabled: newVal })
-          props.setRecordingConfigAudio(newVal)
+          save({ recordingAudioEnabled: newVal })
+          setRecordingAudio(newVal)
         }}
       />
 
@@ -173,6 +205,7 @@ export function AudioCard(props: StreamingCardProps) {
         label={t('webstream.encryptCaptures')}
         hint={t('webstream.encryptCapturesDesc')}
         checked={mediaEncryption.checked()}
+        disabled={readOnly()}
         onChange={mediaEncryption.onToggle}
       />
     </Panel>
@@ -180,44 +213,51 @@ export function AudioCard(props: StreamingCardProps) {
 }
 
 export function HttpsCard(props: StreamingCardProps) {
-  const { httpsToggle } = useToggles(props)
+  const { readOnly, httpsToggle } = useToggles(props)
 
   return (
     <Panel title={t('https.title')} badge={<Led tone={httpsToggle.checked() ? 'ok' : 'off'} />}>
-      <ToggleField
-        label={t('https.serve')}
-        hint={t('https.desc')}
-        checked={httpsToggle.checked()}
-        onChange={httpsToggle.onToggle}
-      />
+      <SettingItem id="streaming.httpsEnabled">
+        <ToggleField
+          label={t('https.serve')}
+          hint={t('https.desc')}
+          checked={httpsToggle.checked()}
+          disabled={readOnly()}
+          onChange={httpsToggle.onToggle}
+        />
+      </SettingItem>
     </Panel>
   )
 }
 
 export function RtspCard(props: StreamingCardProps) {
-  const { s, rtspTls, rtspSubStream, rtspBasicAuthCompat } = useToggles(props)
+  const { s, readOnly, save, saveDebounced, rtspTls, rtspSubStream, rtspBasicAuthCompat } = useToggles(props)
   const rtspVideoCodec = () => s()?.streaming?.rtspVideoCodec ?? API_DEFAULTS.rtspVideoCodec
   // The port is typed, not just dragged: a slider cannot express 8554
   // precisely on a phone. The draft keeps an in-progress edit alive while
   // each keystroke is out of range (typing "85" on the way to "8554").
   const [portDraft, setPortDraft] = createSignal<string | null>(null)
   const commitPort = () => {
+    if (readOnly()) return
     const raw = portDraft()
     if (raw === null) return
     const value = Number.parseInt(raw, 10)
     if (Number.isFinite(value) && value >= API_DEFAULTS.rtspPortMin && value <= API_DEFAULTS.rtspPortMax) {
-      props.updateStreamingAndSave({ rtspPort: value })
+      save({ rtspPort: value })
     }
     setPortDraft(null)
   }
 
   return (
     <Panel title={t('rtsp.title')} badge={<Led tone={s()?.streaming?.rtspEnabled ?? API_DEFAULTS.rtspEnabled ? 'ok' : 'off'} />}>
-      <ToggleField
-        label={t('rtsp.enable')}
-        checked={s()?.streaming?.rtspEnabled ?? API_DEFAULTS.rtspEnabled}
-        onChange={() => props.updateStreamingAndSave({ rtspEnabled: !(s()?.streaming?.rtspEnabled ?? API_DEFAULTS.rtspEnabled) })}
-      />
+      <SettingItem id="streaming.rtspEnabled">
+        <ToggleField
+          label={t('rtsp.enable')}
+          checked={s()?.streaming?.rtspEnabled ?? API_DEFAULTS.rtspEnabled}
+          disabled={readOnly()}
+          onChange={() => save({ rtspEnabled: !(s()?.streaming?.rtspEnabled ?? API_DEFAULTS.rtspEnabled) })}
+        />
+      </SettingItem>
 
       <Show when={s()?.streaming?.rtspEnabled}>
         {/* TLS is the RTSP listener's own setting (issue #18): toggling the
@@ -227,6 +267,7 @@ export function RtspCard(props: StreamingCardProps) {
           label={t('rtsp.tls')}
           hint={t('rtsp.tlsDesc')}
           checked={rtspTls.checked()}
+          disabled={readOnly()}
           onChange={rtspTls.onToggle}
         />
 
@@ -234,6 +275,7 @@ export function RtspCard(props: StreamingCardProps) {
           label={t('rtsp.subStream')}
           hint={t('rtsp.subStreamDesc')}
           checked={rtspSubStream.checked()}
+          disabled={readOnly()}
           onChange={rtspSubStream.onToggle}
         />
 
@@ -241,6 +283,7 @@ export function RtspCard(props: StreamingCardProps) {
           label={t('rtsp.basicAuthCompat')}
           hint={t('rtsp.basicAuthCompatDesc')}
           checked={rtspBasicAuthCompat.checked()}
+          disabled={readOnly()}
           onChange={rtspBasicAuthCompat.onToggle}
         />
 
@@ -254,11 +297,13 @@ export function RtspCard(props: StreamingCardProps) {
             max={API_DEFAULTS.rtspPortMax}
             step={1}
             value={portDraft() ?? String(s()?.streaming?.rtspPort ?? API_DEFAULTS.rtspPort)}
+            disabled={readOnly()}
             onInput={(raw) => {
+              if (readOnly()) return
               setPortDraft(raw)
               const value = Number.parseInt(raw, 10)
               if (Number.isFinite(value) && value >= API_DEFAULTS.rtspPortMin && value <= API_DEFAULTS.rtspPortMax) {
-                props.updateStreamingDebounced({ rtspPort: value })
+                saveDebounced({ rtspPort: value })
               }
             }}
             onBlur={commitPort}
@@ -275,7 +320,8 @@ export function RtspCard(props: StreamingCardProps) {
               { value: 'NV12', label: 'NV12' },
               { value: 'I420', label: 'I420' },
             ]}
-            onChange={(v) => props.updateStreamingAndSave({ rtspInputFormat: v as RtspInputFormat })}
+            disabled={readOnly()}
+            onChange={(v) => save({ rtspInputFormat: v as RtspInputFormat })}
             ariaLabel={t('rtsp.inputFormat')}
           />
         </FieldRow>
@@ -287,7 +333,8 @@ export function RtspCard(props: StreamingCardProps) {
               { value: 'h264', label: t('rtsp.codecH264') },
               { value: 'h265', label: 'H.265' },
             ]}
-            onChange={(v) => props.updateStreamingAndSave({ rtspVideoCodec: v as RtspVideoCodec })}
+            disabled={readOnly()}
+            onChange={(v) => save({ rtspVideoCodec: v as RtspVideoCodec })}
             ariaLabel={t('rtsp.codec')}
           />
         </FieldRow>
@@ -297,16 +344,19 @@ export function RtspCard(props: StreamingCardProps) {
 }
 
 export function KeepAwakeCard(props: StreamingCardProps) {
-  const { keepAwake } = useToggles(props)
+  const { readOnly, keepAwake } = useToggles(props)
 
   return (
     <Panel title={t('keepawake.title')} badge={<Led tone={keepAwake.checked() ? 'ok' : 'off'} />}>
-      <ToggleField
-        label={t('keepawake.enable')}
-        hint={t('keepawake.desc')}
-        checked={keepAwake.checked()}
-        onChange={keepAwake.onToggle}
-      />
+      <SettingItem id="streaming.keepAwake">
+        <ToggleField
+          label={t('keepawake.enable')}
+          hint={t('keepawake.desc')}
+          checked={keepAwake.checked()}
+          disabled={readOnly()}
+          onChange={keepAwake.onToggle}
+        />
+      </SettingItem>
     </Panel>
   )
 }

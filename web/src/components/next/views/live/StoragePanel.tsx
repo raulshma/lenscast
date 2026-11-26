@@ -6,6 +6,7 @@ import { forecastStorage, type StorageForecast } from '../../../../lib/storageFo
 import { formatBytes } from '../../../../format'
 import { t, tCount } from '../../../../lib/i18n'
 import { Panel, FieldRow, TextInput } from '../../ui'
+import { SettingItem, useInspectorSection } from '../../ui/SettingItem'
 
 interface Props {
   settings: () => AllSettings | null
@@ -57,6 +58,11 @@ function clampQuotaMb(raw: string): number | null {
 }
 
 export default function StoragePanel(props: Props) {
+  const inspector = useInspectorSection()
+  const readOnly = () => inspector?.readOnly() === true
+  const saveDebounced = (patch: Partial<AllSettings['streaming']>) => {
+    if (!readOnly()) props.updateStreamingDebounced(patch)
+  }
   const s = () => props.settings()
   const stream = () => s()?.streaming
 
@@ -79,8 +85,10 @@ export default function StoragePanel(props: Props) {
 
   return (
     <Panel title={t('storage.title')}>
+      <SettingItem id="storage.retention">
       <FieldRow label={t('storage.keepCaptures')}>
         <TextInput
+          disabled={readOnly()}
           class="nx-input-num"
           type="number"
           small
@@ -88,7 +96,7 @@ export default function StoragePanel(props: Props) {
           value={String(stream()?.captureRetentionDays ?? API_DEFAULTS.captureRetentionDays)}
           onInput={(raw) => {
             const v = clampRetentionDays(raw)
-            if (v !== null) props.updateStreamingDebounced({ captureRetentionDays: v })
+            if (v !== null) saveDebounced({ captureRetentionDays: v })
           }}
           ariaLabel={t('storage.keepCaptures')}
         />
@@ -96,6 +104,7 @@ export default function StoragePanel(props: Props) {
 
       <FieldRow label={t('storage.keepEvents')}>
         <TextInput
+          disabled={readOnly()}
           class="nx-input-num"
           type="number"
           small
@@ -103,14 +112,17 @@ export default function StoragePanel(props: Props) {
           value={String(stream()?.eventRetentionDays ?? API_DEFAULTS.eventRetentionDays)}
           onInput={(raw) => {
             const v = clampRetentionDays(raw)
-            if (v !== null) props.updateStreamingDebounced({ eventRetentionDays: v })
+            if (v !== null) saveDebounced({ eventRetentionDays: v })
           }}
           ariaLabel={t('storage.keepEvents')}
         />
       </FieldRow>
+      </SettingItem>
 
+      <SettingItem id="storage.quota">
       <FieldRow label={t('storage.quota')}>
         <TextInput
+          disabled={readOnly()}
           class="nx-input-num"
           type="number"
           small
@@ -118,12 +130,14 @@ export default function StoragePanel(props: Props) {
           value={String(stream()?.storageQuotaMb ?? API_DEFAULTS.storageQuotaMb)}
           onInput={(raw) => {
             const v = clampQuotaMb(raw)
-            if (v !== null) props.updateStreamingDebounced({ storageQuotaMb: v })
+            if (v !== null) saveDebounced({ storageQuotaMb: v })
           }}
           ariaLabel={t('storage.quota')}
         />
       </FieldRow>
+      </SettingItem>
 
+      <SettingItem id="storage.summary">
       <Show when={forecast()}>
         {(f) => (
           <div class="nx-banner nx-banner-info" role="note">
@@ -137,6 +151,7 @@ export default function StoragePanel(props: Props) {
       <div class="nx-banner nx-banner-neutral" role="note" aria-live="polite">
         <span>{t('storage.retentionDesc')}</span>
       </div>
+      </SettingItem>
     </Panel>
   )
 }

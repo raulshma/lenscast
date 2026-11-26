@@ -16,6 +16,7 @@ import com.raulshma.lenscast.streaming.web.StatusWebHandler
 import com.raulshma.lenscast.streaming.web.StreamWebHandler
 import com.raulshma.lenscast.streaming.web.SystemWebHandler
 import com.raulshma.lenscast.streaming.web.UnifiedPushWebHandler
+import com.raulshma.lenscast.streaming.web.WebUiLayoutWebHandler
 
 /**
  * The Web API modules handed to each StreamingServer at construction. The
@@ -44,6 +45,8 @@ data class WebApiStack(
     val unifiedPush: UnifiedPushWebHandler,
     /** GET/PUT /api/automation — the time-of-day automation state and rule list. */
     val automation: AutomationWebHandler,
+    /** GET/PUT/DELETE /api/ui/layout — the persisted inspector layout and custom presets. */
+    val uiLayout: WebUiLayoutWebHandler,
     /** POST /api/automation/test(+/restore) — the Automation Test's arm/restore pair. */
     val automationTest: AutomationTestWebHandler,
 )

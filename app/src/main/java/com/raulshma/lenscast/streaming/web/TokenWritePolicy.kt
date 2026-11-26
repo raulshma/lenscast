@@ -92,6 +92,10 @@ object TokenWritePolicy {
     // token GET/HEAD on /api/push/subscriptions too). The UnifiedPush routes
     // above are the automation exception, and both are receiver-scoped.
 
+    // Deliberately absent: persisted administrator configuration, including
+    // /api/ui/layout. Its write verb is PUT (there is no POST alias), and the
+    // route stays session-cookie-only for writes; tokens retain read access.
+
     /** True when a POST carrying a valid API token may proceed to [path]. */
     fun allowsPost(path: String): Boolean = path in TOKEN_WRITABLE_POST_ROUTES
 }

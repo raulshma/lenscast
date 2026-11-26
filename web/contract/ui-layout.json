@@ -1,0 +1,141 @@
+{
+  "schemaVersion": 1,
+  "updatedAtMs": 1763961600000,
+  "activePresetId": "default",
+  "column": {
+    "widthPx": 320,
+    "widthPreset": "default",
+    "collapsed": false
+  },
+  "sections": [
+    {
+      "id": "channels",
+      "kind": "builtin",
+      "sectionId": "channels",
+      "visible": true,
+      "collapsed": false,
+      "hiddenItems": [],
+      "customTitle": null,
+      "items": []
+    },
+    {
+      "id": "storage",
+      "kind": "builtin",
+      "sectionId": "storage",
+      "visible": true,
+      "collapsed": false,
+      "hiddenItems": [],
+      "customTitle": null,
+      "items": []
+    },
+    {
+      "id": "clients",
+      "kind": "builtin",
+      "sectionId": "clients",
+      "visible": true,
+      "collapsed": false,
+      "hiddenItems": [],
+      "customTitle": null,
+      "items": []
+    },
+    {
+      "id": "masking-quick",
+      "kind": "builtin",
+      "sectionId": "masking-quick",
+      "visible": true,
+      "collapsed": false,
+      "hiddenItems": [],
+      "customTitle": null,
+      "items": []
+    },
+    {
+      "id": "system-info",
+      "kind": "builtin",
+      "sectionId": "system-info",
+      "visible": true,
+      "collapsed": false,
+      "hiddenItems": [],
+      "customTitle": null,
+      "items": []
+    }
+  ],
+  "presets": [
+    {
+      "id": "preset_night_watch",
+      "name": "Night Watch",
+      "column": {
+        "widthPx": 380,
+        "widthPreset": "custom",
+        "collapsed": false
+      },
+      "sections": [
+        {
+          "id": "channels",
+          "kind": "builtin",
+          "sectionId": "channels",
+          "visible": true,
+          "collapsed": false,
+          "hiddenItems": [
+            "channels.status"
+          ],
+          "customTitle": null,
+          "items": []
+        },
+        {
+          "id": "storage",
+          "kind": "builtin",
+          "sectionId": "storage",
+          "visible": true,
+          "collapsed": false,
+          "hiddenItems": [],
+          "customTitle": null,
+          "items": []
+        },
+        {
+          "id": "clients",
+          "kind": "builtin",
+          "sectionId": "clients",
+          "visible": true,
+          "collapsed": true,
+          "hiddenItems": [],
+          "customTitle": null,
+          "items": []
+        },
+        {
+          "id": "masking-quick",
+          "kind": "builtin",
+          "sectionId": "masking-quick",
+          "visible": true,
+          "collapsed": false,
+          "hiddenItems": [],
+          "customTitle": null,
+          "items": []
+        },
+        {
+          "id": "system-info",
+          "kind": "builtin",
+          "sectionId": "system-info",
+          "visible": false,
+          "collapsed": false,
+          "hiddenItems": [],
+          "customTitle": null,
+          "items": []
+        },
+        {
+          "id": "custom_night_controls",
+          "kind": "custom",
+          "sectionId": "custom-custom_night_controls",
+          "visible": true,
+          "collapsed": false,
+          "hiddenItems": [],
+          "customTitle": "Night Controls",
+          "items": [
+            "exposure.iso",
+            "exposure.time",
+            "streaming.audioEnabled"
+          ]
+        }
+      ]
+    }
+  ]
+}

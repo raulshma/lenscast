@@ -17,7 +17,9 @@ import {
   startMaskEdit,
 } from '../../../lib/maskEditStore'
 import { hashRouter, isNextRoute, type RouteName } from '../../../lib/router'
-import type { AllSettings, DeviceStatus, MaskingZone } from '../../../types'
+import type { AllSettings, DeviceStatus, MaskingZone, WebUiLayoutDto } from '../../../types'
+import type { InspectorLayoutController } from '../../../hooks/useInspectorLayout'
+import { defaultInspectorLayout } from '../../../lib/inspectorLayout'
 import type { PlayerMode } from '../../../video/playerLadder'
 import { createMaskEditSession, type MaskEditState } from './live/masking/maskEditSession'
 import type { NextState } from '../NextState'
@@ -1022,5 +1024,158 @@ describe('LiveView — the edit layout, as written in masking.css', () => {
     for (const value of colours) {
       expect(/var\(--color-|transparent|\bnone\b/.test(value), `${value} is not a colour token`).toBe(true)
     }
+  })
+})
+
+function configuredLayout(initial = defaultInspectorLayout()) {
+  const [layout, setLayout] = createSignal<WebUiLayoutDto>(initial)
+  const controller: InspectorLayoutController = {
+    layout,
+    ready: () => true,
+    saving: () => false,
+    localOnly: () => false,
+    error: () => '',
+    mutate: (transform) => setLayout((current) => transform(current)),
+    replaceLayout: (raw) => setLayout(raw as WebUiLayoutDto),
+    reset: async () => { setLayout(defaultInspectorLayout()) },
+    refresh: async () => {},
+    flush: async () => {},
+  }
+  return { layout, controller }
+}
+
+function mountConfigured(state: NextState, controller: InspectorLayoutController) {
+  return render(() => <LiveView state={state} inspectorLayout={controller} />)
+}
+
+describe('LiveView — configurable inspector', () => {
+  it('keeps the exact default five panels in their original order', () => {
+    const { state } = fixtureState()
+    const { controller } = configuredLayout()
+    mountConfigured(state, controller)
+    expect(Array.from(column()!.querySelectorAll('.nx-inspector-frame'), (frame) => frame.getAttribute('data-section-id')))
+      .toEqual(['channels', 'storage', 'clients', 'masking-quick', 'system-info'])
+  })
+
+  it('renders custom placements as pinned controls even when an imported id collides with a built-in', () => {
+    const { state } = fixtureState()
+    const initial = defaultInspectorLayout()
+    initial.sections = [{
+      id: 'custom-imported',
+      kind: 'custom',
+      sectionId: 'channels',
+      visible: true,
+      collapsed: false,
+      hiddenItems: [],
+      customTitle: 'Imported rig',
+      items: ['channels.status'],
+    }]
+    const { controller } = configuredLayout(initial)
+    mountConfigured(state, controller)
+    expect(screen.getByText('Imported rig')).toBeTruthy()
+    expect(screen.queryByTestId('panel-channels')).toBeNull()
+    expect(column()!.querySelector('.nx-channel')).not.toBeNull()
+  })
+
+  it('renders operator order but strips admin panels and disables layout controls for viewers', () => {
+    const base = fixtureState()
+    const [isViewer] = createSignal(true)
+    const state = { ...base.state, isViewer } as unknown as NextState
+    const initial = defaultInspectorLayout()
+    initial.sections = [
+      initial.sections[4],
+      { ...initial.sections[0], id: 'plc_channels', sectionId: 'channels' },
+      { ...initial.sections[0], id: 'plc_auth', sectionId: 'auth' },
+    ]
+    const { controller } = configuredLayout(initial)
+    mountConfigured(state, controller)
+    expect(Array.from(column()!.querySelectorAll('.nx-inspector-frame'), (frame) => frame.getAttribute('data-section-id')))
+      .toEqual(['system-info', 'channels'])
+    expect(screen.queryByRole('button', { name: en['next.inspector.customize'] })).toBeNull()
+    const separator = screen.getByRole('separator', { name: en['next.inspector.resize'] })
+    expect(separator.getAttribute('aria-disabled')).toBe('true')
+    expect(separator.getAttribute('tabindex')).toBe('-1')
+  })
+
+  it('resizes by keyboard and pointer, commits once, and clamps to the stage-safe maximum', () => {
+    const { state } = fixtureState()
+    const { layout, controller } = configuredLayout()
+    mountConfigured(state, controller)
+    const separator = screen.getByRole('separator', { name: en['next.inspector.resize'] })
+    fireEvent.keyDown(separator, { key: 'ArrowRight' })
+    expect(layout().column.widthPx).toBe(340)
+    fireEvent.keyDown(separator, { key: 'Home' })
+    expect(layout().column.widthPx).toBe(260)
+    fireEvent.keyDown(separator, { key: 'End' })
+    expect(layout().column.widthPx).toBe(Math.min(560, window.innerWidth - 680))
+    fireEvent.keyDown(separator, { key: 'Home' })
+    for (let step = 0; step < 3; step += 1) fireEvent.keyDown(separator, { key: 'ArrowRight' })
+    expect(layout().column.widthPx).toBe(320)
+
+    fireEvent.pointerDown(separator, { clientX: 500, pointerId: 1 })
+    fireEvent.pointerMove(separator, { clientX: 440, pointerId: 1 })
+    expect(layout().column.widthPx).toBe(320)
+    fireEvent.pointerUp(separator, { clientX: 440, pointerId: 1 })
+    expect(layout().column.widthPx).toBe(Math.min(560, window.innerWidth - 680))
+  })
+
+  it('temporarily expands a collapsed inspector for masking and restores the saved collapse', () => {
+    const { state } = fixtureState({ zones: [zone('a')] })
+    const initial = defaultInspectorLayout()
+    initial.column.collapsed = true
+    const { layout, controller } = configuredLayout(initial)
+    mountConfigured(state, controller)
+    expect(column()!.classList.contains('nx-inspector-collapsed')).toBe(true)
+    startMaskEdit()
+    expect(column()!.classList.contains('nx-inspector-collapsed')).toBe(false)
+    expect(layout().column.collapsed).toBe(true)
+    fireEvent.click(done()!)
+    expect(column()!.classList.contains('nx-inspector-collapsed')).toBe(true)
+    expect(layout().column.collapsed).toBe(true)
+  })
+
+  it('closes the configurator when masking starts and does not reopen it afterward', () => {
+    const { state } = fixtureState({ zones: [zone('a')] })
+    const { controller } = configuredLayout()
+    mountConfigured(state, controller)
+    fireEvent.click(screen.getByRole('button', { name: en['next.inspector.customize'] }))
+    expect(screen.getByRole('dialog', { name: en['next.inspector.configurator.title'] })).toBeTruthy()
+    startMaskEdit()
+    expect(screen.queryByRole('dialog', { name: en['next.inspector.configurator.title'] })).toBeNull()
+    fireEvent.click(done()!)
+    expect(screen.queryByRole('dialog', { name: en['next.inspector.configurator.title'] })).toBeNull()
+  })
+
+  it('mounts one inspector in the tablet drawer and replaces it with the configurator', () => {
+    const { state } = fixtureState()
+    const { controller } = configuredLayout()
+    mountConfigured(state, controller)
+    fireEvent.click(screen.getByRole('button', { name: en['next.inspector'] }))
+    const drawer = screen.getByRole('dialog', { name: en['view.live'] })
+    expect(document.querySelectorAll('.nx-inspector-frame')).toHaveLength(5)
+    fireEvent.click(within(drawer).getByRole('button', { name: en['next.inspector.customize'] }))
+    expect(screen.queryByRole('dialog', { name: en['view.live'] })).toBeNull()
+    expect(document.querySelectorAll('.nx-drawer')).toHaveLength(1)
+    expect(screen.getByRole('dialog', { name: en['next.inspector.configurator.title'] })).toBeTruthy()
+  })
+
+  it('offers a configure action when every registered panel item is hidden', () => {
+    const { state } = fixtureState()
+    const initial = defaultInspectorLayout()
+    initial.sections.push({
+      id: 'custom-empty',
+      kind: 'custom',
+      sectionId: 'custom-empty',
+      visible: true,
+      collapsed: false,
+      hiddenItems: [],
+      customTitle: 'Empty section',
+      items: [],
+    })
+    const { controller } = configuredLayout(initial)
+    mountConfigured(state, controller)
+    expect(screen.getByText(en['next.inspector.allHidden'])).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: en['next.inspector.configurator.configureItems'] }))
+    expect(screen.getByRole('dialog', { name: en['next.inspector.configurator.title'] })).toBeTruthy()
   })
 })

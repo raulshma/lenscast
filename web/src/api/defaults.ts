@@ -216,6 +216,20 @@ export const API_DEFAULTS = {
   automationMissedWindowDefaultMinutes: 30,
   automationMissedWindowPresets: [5, 15, 30, 60, 180],
 
+  // Web UI layout (WebUiLayoutDto): schema/default column values and the
+  // sanitizer bounds shared with the device. The contract fixture pins the
+  // schema and default width; the remaining bounds cap persisted placements,
+  // custom presets, item lists and user-authored labels.
+  webUiLayoutSchemaVersion: 1,
+  webUiLayoutColumnWidthMinPx: 260,
+  webUiLayoutColumnWidthDefaultPx: 320,
+  webUiLayoutColumnWidthMaxPx: 560,
+  webUiLayoutMaxSections: 48,
+  webUiLayoutMaxCustomPresets: 12,
+  webUiLayoutMaxCustomItemsPerSection: 24,
+  webUiLayoutMaxTitleLength: 48,
+  webUiLayoutMaxPresetNameLength: 40,
+
   // Overlay block (OverlaySettings.DEFAULT, embedded in StreamingSettingsDto)
   overlayEnabled: false,
   overlayPosition: 'TOP_LEFT',

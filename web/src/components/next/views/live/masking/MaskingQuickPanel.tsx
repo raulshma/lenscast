@@ -3,6 +3,7 @@ import type { NextState } from '../../../NextState'
 import { t } from '../../../../../lib/i18n'
 import { maskEditActive, startMaskEdit } from '../../../../../lib/maskEditStore'
 import { Button, FieldRow, Led, Panel } from '../../../ui'
+import { SettingItem, useInspectorSection } from '../../../ui/SettingItem'
 import { webStreamActive } from './webStreamActive'
 
 export interface MaskingQuickPanelProps {
@@ -26,6 +27,8 @@ export interface MaskingQuickPanelProps {
  * running, and the stage has the inspector.
  */
 export default function MaskingQuickPanel(props: MaskingQuickPanelProps) {
+  const inspector = useInspectorSection()
+  const readOnly = () => props.state.isViewer?.() === true || inspector?.readOnly() === true
   const streaming = () => props.state.settings()?.streaming
   const zones = () => streaming()?.maskingZones ?? []
   const masking = () => streaming()?.maskingEnabled === true && zones().some((zone) => zone.enabled)
@@ -33,22 +36,27 @@ export default function MaskingQuickPanel(props: MaskingQuickPanelProps) {
 
   return (
     <Show when={!maskEditActive()}>
-      <Panel title={t('privacy.title')} badge={<Led tone={masking() ? 'ok' : 'off'} />}>
-        <FieldRow
-          label={t('privacy.zones', { count: zones().length })}
-          hint={streamOn() ? undefined : t('privacy.streamOffHint')}
-        >
-          <Button
-            size="sm"
-            variant="primary"
-            disabled={!streamOn()}
-            title={streamOn() ? t('privacy.editZoneTitle') : t('privacy.streamOffHint')}
-            ariaLabel={t('privacy.editZoneTitle')}
-            onClick={() => startMaskEdit()}
+      <Panel
+        title={t('privacy.title')}
+        badge={<SettingItem id="masking.enabled"><Led tone={masking() ? 'ok' : 'off'} /></SettingItem>}
+      >
+        <SettingItem id="masking.edit">
+          <FieldRow
+            label={t('privacy.zones', { count: zones().length })}
+            hint={streamOn() ? undefined : t('privacy.streamOffHint')}
           >
-            {t('privacy.editZones')}
-          </Button>
-        </FieldRow>
+            <Button
+              size="sm"
+              variant="primary"
+              disabled={!streamOn() || readOnly()}
+              title={streamOn() ? t('privacy.editZoneTitle') : t('privacy.streamOffHint')}
+              ariaLabel={t('privacy.editZoneTitle')}
+              onClick={() => { if (!readOnly()) startMaskEdit() }}
+            >
+              {t('privacy.editZones')}
+            </Button>
+          </FieldRow>
+        </SettingItem>
       </Panel>
     </Show>
   )

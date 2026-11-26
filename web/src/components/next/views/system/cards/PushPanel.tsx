@@ -5,6 +5,7 @@ import { permissionLabel, pushSupport, urlBase64ToUint8Array, type PushSupportRe
 import { deletePushSubscription, getVapidPublicKey, subscribePush } from '../../../../../api/client'
 import { t } from '../../../../../lib/i18n'
 import { Panel, FieldRow, ToggleField, Button } from '../../../ui'
+import { SettingItem, useInspectorSection } from '../../../ui/SettingItem'
 
 interface Props {
   settings: () => AllSettings | null
@@ -46,6 +47,8 @@ function localizedPermissionLabel(permission: string | undefined): string {
  * device toggle is on.
  */
 export default function PushPanel(props: Props) {
+  const inspector = useInspectorSection()
+  const readOnly = () => inspector?.readOnly() === true
   const s = () => props.settings()
   const pushOn = () => s()?.streaming.pushEnabled ?? API_DEFAULTS.pushEnabled
   // The support verdict is a property of the browser, not of time — read once
@@ -82,7 +85,7 @@ export default function PushPanel(props: Props) {
   }
 
   function runGuarded(action: () => Promise<unknown>) {
-    if (busy()) return
+    if (readOnly() || busy()) return
     setBusy(true)
     setMessage('')
     action()
@@ -135,15 +138,20 @@ export default function PushPanel(props: Props) {
 
   return (
     <Panel title={t('push.title')}>
-      <ToggleField
-        label={t('push.deviceToggle')}
-        checked={pushOn()}
-        onChange={() => props.updateStreamingAndSave({ pushEnabled: !pushOn() })}
-      />
-      <div class="nx-banner nx-banner-neutral" role="note" aria-live="polite">
-        <span>{t('push.desc')}</span>
-      </div>
-
+      <SettingItem id="push.enabled">
+        <ToggleField
+          disabled={readOnly()}
+          label={t('push.deviceToggle')}
+          checked={pushOn()}
+          onChange={() => {
+            if (!readOnly()) props.updateStreamingAndSave({ pushEnabled: !pushOn() })
+          }}
+        />
+        <div class="nx-banner nx-banner-neutral" role="note" aria-live="polite">
+          <span>{t('push.desc')}</span>
+        </div>
+      </SettingItem>
+      <SettingItem id="push.subscription">
       <Show
         when={supported}
         fallback={
@@ -162,12 +170,12 @@ export default function PushPanel(props: Props) {
           <span class="nx-info-value">{localizedPermissionLabel(permission())}</span>
         </FieldRow>
         <Show when={subscribed() === true}>
-          <Button size="sm" variant="ghost" disabled={busy()} onClick={disable}>
+          <Button size="sm" variant="ghost" disabled={busy() || readOnly()} onClick={disable}>
             {busy() ? t('push.working') : t('push.disable')}
           </Button>
         </Show>
         <Show when={subscribed() === false}>
-          <Button size="sm" variant="ghost" disabled={busy()} onClick={enable}>
+          <Button size="sm" variant="ghost" disabled={busy() || readOnly()} onClick={enable}>
             {busy() ? t('push.working') : t('push.enable')}
           </Button>
         </Show>
@@ -177,6 +185,7 @@ export default function PushPanel(props: Props) {
           </span>
         </Show>
       </Show>
+    </SettingItem>
     </Panel>
   )
 }

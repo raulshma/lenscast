@@ -20,6 +20,7 @@ class ApiRouterTest {
 
     private val settings = mockk<SettingsWebHandler>(relaxed = true)
     private val automation = mockk<AutomationWebHandler>(relaxed = true)
+    private val uiLayout = mockk<WebUiLayoutWebHandler>(relaxed = true)
     private val status = mockk<StatusWebHandler>(relaxed = true)
     private val stream = mockk<StreamWebHandler>(relaxed = true)
     private val capture = mockk<CaptureWebHandler>(relaxed = true)
@@ -42,6 +43,7 @@ class ApiRouterTest {
     private fun router() = ApiRouter(
         settings = settings,
         automation = automation,
+        uiLayout = uiLayout,
         status = status,
         stream = stream,
         capture = capture,
@@ -254,6 +256,20 @@ class ApiRouterTest {
     }
 
     @Test
+    fun `ui layout reads writes and resets dispatch to their handler`() {
+        coEvery { uiLayout.get() } returns """{"layout":"read"}"""
+        coEvery { uiLayout.put("""{"layout":"saved"}""") } returns """{"layout":"saved"}"""
+        coEvery { uiLayout.reset() } returns """{"layout":"default"}"""
+
+        assertEquals("""{"layout":"read"}""", dispatch(ApiRequest(ApiMethod.GET, "/api/ui/layout")).body)
+        assertEquals(
+            """{"layout":"saved"}""",
+            dispatch(ApiRequest(ApiMethod.PUT, "/api/ui/layout", body = """{"layout":"saved"}""")).body,
+        )
+        assertEquals("""{"layout":"default"}""", dispatch(ApiRequest(ApiMethod.DELETE, "/api/ui/layout")).body)
+    }
+
+    @Test
     fun `the remaining status reads dispatch`() {
         coEvery { stream.listClients() } returns """{"clients":2}"""
         coEvery { interval.status() } returns """{"interval":true}"""
@@ -318,6 +334,8 @@ class ApiRouterTest {
             ApiRequest(ApiMethod.DELETE, "/api/settings"),
             ApiRequest(ApiMethod.GET, "/api/stream/start"),
             ApiRequest(ApiMethod.GET, "/api/recording/stop"),
+            // Layout has no POST alias even though PUT shares routeWrite.
+            ApiRequest(ApiMethod.POST, "/api/ui/layout", body = "{}"),
         )) {
             assertEquals(404, dispatch(request).httpStatus)
         }

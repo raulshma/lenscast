@@ -87,8 +87,9 @@ class TokenWritePolicyTest {
     }
 
     @Test
-    fun `settings and auth routes are never token-writable`() {
+    fun `settings auth and persisted ui layout routes are never token-writable`() {
         assertFalse(TokenWritePolicy.allowsPost("/api/settings"))
+        assertFalse(TokenWritePolicy.allowsPost("/api/ui/layout"))
         assertFalse(TokenWritePolicy.allowsPost("/api/auth/login"))
         assertFalse(TokenWritePolicy.allowsPost("/api/auth/logout"))
         assertFalse(TokenWritePolicy.allowsPost("/api/auth/config"))

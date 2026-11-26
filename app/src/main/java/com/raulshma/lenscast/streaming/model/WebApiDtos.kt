@@ -385,6 +385,77 @@ data class SettingsUpdateRequestDto(
     val streaming: StreamingSettingsDto? = null,
 )
 
+// ── Web UI Layout DTOs ──
+
+/** The inspector column's persisted width and display state. */
+@JsonClass(generateAdapter = true)
+data class WebUiColumnDto(
+    val widthPx: Int = StreamDefaults.COLUMN_WIDTH_DEFAULT_PX,
+    val widthPreset: String = "default",
+    val collapsed: Boolean = false,
+)
+
+/**
+ * One built-in or custom section placement. [id] identifies the placement
+ * (including a custom section's identity); [sectionId] identifies the built-in
+ * catalog entry, or the custom section's derived id.
+ */
+@JsonClass(generateAdapter = true)
+data class WebUiSectionPlacementDto(
+    val id: String = "",
+    val kind: String = "builtin",
+    val sectionId: String = "",
+    val visible: Boolean = true,
+    val collapsed: Boolean = false,
+    val hiddenItems: List<String> = emptyList(),
+    val customTitle: String? = null,
+    val items: List<String> = emptyList(),
+)
+
+/** A named, recursively sanitized snapshot of a column and its placements. */
+@JsonClass(generateAdapter = true)
+data class WebUiLayoutPresetDto(
+    val id: String = "",
+    val name: String = "",
+    val column: WebUiColumnDto = WebUiColumnDto(),
+    val sections: List<WebUiSectionPlacementDto> = WebUiLayoutDto.defaultSections(),
+)
+
+/**
+ * GET/PUT /api/ui/layout's persisted document. Every field has a constructor
+ * default so partial documents decode; the server policy remains the single
+ * owner of normalization and bounds before anything is returned or saved.
+ */
+@JsonClass(generateAdapter = true)
+data class WebUiLayoutDto(
+    val schemaVersion: Int = StreamDefaults.WEB_UI_LAYOUT_SCHEMA_VERSION,
+    val updatedAtMs: Long = 0L,
+    val activePresetId: String = "default",
+    val column: WebUiColumnDto = WebUiColumnDto(),
+    val sections: List<WebUiSectionPlacementDto> = defaultSections(),
+    val presets: List<WebUiLayoutPresetDto> = emptyList(),
+) {
+    companion object {
+        /** The five placements a fresh install and the Default preset use. */
+        internal val DEFAULT_SECTION_IDS = listOf(
+            "channels",
+            "storage",
+            "clients",
+            "masking-quick",
+            "system-info",
+        )
+
+        internal fun defaultSections(): List<WebUiSectionPlacementDto> =
+            DEFAULT_SECTION_IDS.map { sectionId ->
+                WebUiSectionPlacementDto(
+                    id = sectionId,
+                    kind = "builtin",
+                    sectionId = sectionId,
+                )
+            }
+    }
+}
+
 /**
  * The versioned settings-export envelope behind GET /api/settings/export:
  * the current settings document (secrets blanked, exactly as GET /api/settings

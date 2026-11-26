@@ -2,6 +2,7 @@ import { Show } from 'solid-js'
 import { t } from '../../../../../lib/i18n'
 import { IconPlus } from '../../../../icons'
 import { Button } from '../../../ui'
+import { SettingItem, useInspectorSection } from '../../../ui/SettingItem'
 import type { MaskEditSession } from './maskEditSession'
 
 export interface MaskEditBarProps {
@@ -20,6 +21,8 @@ export interface MaskEditBarProps {
  * same draft, the same selection, the same "armed" flag the layer draws.
  */
 export default function MaskEditBar(props: MaskEditBarProps) {
+  const inspector = useInspectorSection()
+  const readOnly = () => inspector?.readOnly() === true
   const session = props.session
   const drawing = () => session.drawing()
 
@@ -32,6 +35,7 @@ export default function MaskEditBar(props: MaskEditBarProps) {
   }
 
   return (
+    <SettingItem id="masking.edit">
     <div class="nx-mask-bar" role="region" aria-label={t('privacy.editor.title')}>
       <div class="nx-mask-bar-text">
         <span class="nx-mask-bar-title">{t('privacy.editor.title')}</span>
@@ -47,15 +51,22 @@ export default function MaskEditBar(props: MaskEditBarProps) {
           size="sm"
           variant={drawing() ? 'toggled' : 'secondary'}
           ariaPressed={drawing()}
-          onClick={() => session.toggleDrawing()}
+          disabled={readOnly()}
+          onClick={() => { if (!readOnly()) session.toggleDrawing() }}
         >
           <IconPlus size={14} />
           {t('privacy.addZone')}
         </Button>
-        <Button size="sm" variant="primary" onClick={() => session.finish()}>
+        <Button
+          size="sm"
+          variant="primary"
+          disabled={readOnly()}
+          onClick={() => { if (!readOnly()) session.finish() }}
+        >
           {t('privacy.editor.done')}
         </Button>
       </div>
     </div>
+    </SettingItem>
   )
 }

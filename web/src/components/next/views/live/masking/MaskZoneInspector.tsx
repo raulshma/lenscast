@@ -16,6 +16,7 @@ import {
   TextInput,
   ToggleField,
 } from '../../../ui'
+import { SettingItem, useInspectorSection } from '../../../ui/SettingItem'
 import type { MaskEditSession, MaskEditZonePatch } from './maskEditSession'
 
 /** Wire value → i18n key for the masking-type options. */
@@ -131,6 +132,8 @@ export interface MaskZoneInspectorProps {
  * `lateField`.
  */
 export default function MaskZoneInspector(props: MaskZoneInspectorProps) {
+  const inspector = useInspectorSection()
+  const readOnly = () => inspector?.readOnly() === true
   const session = props.session
   const zones = () => session.zones()
 
@@ -140,14 +143,22 @@ export default function MaskZoneInspector(props: MaskZoneInspectorProps) {
           paints on the stream. The inspector leads with the reason and the
           one action — the kit's warning banner, amber at soft strength (the
           operator's-attention voice, not a fault). */}
+      <SettingItem id="masking.enabled">
       <Show when={!session.maskingEnabled()}>
         <div class="nx-banner nx-banner-warning" role="status">
           <span class="nx-mask-warn-text">{t('privacy.editor.maskingOff')}</span>
-          <Button size="sm" variant="secondary" onClick={() => session.setMaskingEnabled(true)}>
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={readOnly()}
+            onClick={() => { if (!readOnly()) session.setMaskingEnabled(true) }}
+          >
             {t('privacy.editor.maskingOffAction')}
           </Button>
         </div>
       </Show>
+      </SettingItem>
+      <SettingItem id="masking.zones">
       <Panel title={t('privacy.zones', { count: zones().length })}>
         <Show
           when={zones().length > 0}
@@ -190,8 +201,9 @@ export default function MaskZoneInspector(props: MaskZoneInspectorProps) {
                         never has to move the selection to do it. */}
                     <Switch
                       checked={zone.enabled}
+                      disabled={readOnly()}
                       ariaLabel={`${name()} · ${t('privacy.enabled')}`}
-                      onChange={(enabled) => session.updateZone({ enabled }, zone.id)}
+                      onChange={(enabled) => { if (!readOnly()) session.updateZone({ enabled }, zone.id) }}
                     />
                   </div>
                 )
@@ -200,6 +212,7 @@ export default function MaskZoneInspector(props: MaskZoneInspectorProps) {
           </div>
         </Show>
       </Panel>
+      </SettingItem>
 
       <Show
         when={session.selectedId()}
@@ -222,7 +235,12 @@ export default function MaskZoneInspector(props: MaskZoneInspectorProps) {
 
 /** Keyed by zone id (the Show above): one instance per selection, so every draft starts from the zone. */
 function ZoneDetails(props: { session: MaskEditSession; zoneId: string }) {
+  const inspector = useInspectorSection()
+  const readOnly = () => inspector?.readOnly() === true
   const session = props.session
+  const updateZone = (patch: MaskEditZonePatch) => {
+    if (!readOnly()) session.updateZone(patch, props.zoneId)
+  }
   const zone = () => session.zones().find((item) => item.id === props.zoneId) ?? null
   const name = () => {
     const list = session.zones()
@@ -234,22 +252,28 @@ function ZoneDetails(props: { session: MaskEditSession; zoneId: string }) {
 
   const label = lateField(
     () => zone()?.label ?? '',
-    (value) => session.updateZone({ label: value }, props.zoneId),
+    (value) => updateZone({ label: value }),
   )
   const pixelSize = lateField(
     () => zone()?.pixelateSize ?? 16,
-    (value) => session.updateZone({ pixelateSize: value }, props.zoneId),
+    (value) => updateZone({ pixelateSize: value }),
   )
   const blurRadius = lateField(
     () => zone()?.blurRadius ?? 10,
-    (value) => session.updateZone({ blurRadius: Math.round(value) }, props.zoneId),
+    (value) => updateZone({ blurRadius: Math.round(value) }),
   )
 
   return (
+    <SettingItem id="masking.zones">
     <Panel
       title={name()}
       actions={
-        <Button size="sm" variant="danger-soft" onClick={() => session.removeZone(props.zoneId)}>
+        <Button
+          size="sm"
+          variant="danger-soft"
+          disabled={readOnly()}
+          onClick={() => { if (!readOnly()) session.removeZone(props.zoneId) }}
+        >
           {t('privacy.removeZone')}
         </Button>
       }
@@ -257,6 +281,7 @@ function ZoneDetails(props: { session: MaskEditSession; zoneId: string }) {
       <FieldRow label={t('privacy.label')}>
         <div class="nx-mask-field" onKeyDown={commitOnEnter}>
           <TextInput
+            disabled={readOnly()}
             class="nx-mask-label-input"
             small
             value={label.draft()}
@@ -269,17 +294,19 @@ function ZoneDetails(props: { session: MaskEditSession; zoneId: string }) {
       </FieldRow>
 
       <ToggleField
+        disabled={readOnly()}
         label={t('privacy.enabled')}
         checked={zone()?.enabled}
-        onChange={(enabled) => session.updateZone({ enabled }, props.zoneId)}
+        onChange={(enabled) => updateZone({ enabled })}
       />
 
       <FieldRow label={t('privacy.maskType')}>
         <Select
+          disabled={readOnly()}
           small
           value={zone()?.type}
           options={typeOptions}
-          onChange={(value) => session.updateZone({ type: value as MaskingType }, props.zoneId)}
+          onChange={(value) => updateZone({ type: value as MaskingType })}
           ariaLabel={t('privacy.maskType')}
         />
       </FieldRow>
@@ -287,6 +314,7 @@ function ZoneDetails(props: { session: MaskEditSession; zoneId: string }) {
       {/* The parameter belongs to the type: one slider is on screen at a time. */}
       <Show when={zone()?.type === 'PIXELATE'}>
         <SliderField
+          disabled={readOnly()}
           label={t('privacy.pixelSize')}
           display={`${pixelSize.draft()}px`}
           min={4}
@@ -298,6 +326,7 @@ function ZoneDetails(props: { session: MaskEditSession; zoneId: string }) {
       </Show>
       <Show when={zone()?.type === 'BLUR'}>
         <SliderField
+          disabled={readOnly()}
           label={t('privacy.blurRadius')}
           display={String(Math.round(blurRadius.draft()))}
           min={1}
@@ -331,10 +360,12 @@ function ZoneDetails(props: { session: MaskEditSession; zoneId: string }) {
                 value={() => toPercent(zone()?.[field.key] ?? 0)}
                 min={field.min}
                 max={field.max}
+                disabled={readOnly()}
                 onCommit={(percent) => {
+                  if (readOnly()) return
                   const patch: MaskEditZonePatch = {}
                   patch[field.key] = fromPercent(percent)
-                  session.updateZone(patch, props.zoneId)
+                  updateZone(patch)
                 }}
               />
             )}
@@ -342,6 +373,7 @@ function ZoneDetails(props: { session: MaskEditSession; zoneId: string }) {
         </div>
       </Show>
     </Panel>
+    </SettingItem>
   )
 }
 
@@ -362,6 +394,7 @@ function PercentField(props: {
   value: () => number
   min: number
   max: number
+  disabled?: boolean
   onCommit: (percent: number) => void
 }) {
   const [text, setText] = createSignal(String(props.value()))
@@ -390,6 +423,7 @@ function PercentField(props: {
   return (
     <Field label={props.label}>
       <TextInput
+        disabled={props.disabled}
         class="nx-mask-percent"
         type="number"
         min={props.min}

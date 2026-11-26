@@ -333,6 +333,43 @@ export interface AllSettings {
   streaming: StreamingSettings
 }
 
+/** The persisted inspector column geometry on GET/PUT/DELETE /api/ui/layout. */
+export interface WebUiColumnDto {
+  widthPx: number
+  widthPreset: 'compact' | 'default' | 'wide' | 'custom'
+  collapsed: boolean
+}
+
+/** One ordered built-in or custom section placement in a web UI layout. */
+export interface WebUiSectionPlacementDto {
+  id: string
+  kind: 'builtin' | 'custom'
+  sectionId: string
+  visible: boolean
+  collapsed: boolean
+  hiddenItems: string[]
+  customTitle: string | null
+  items: string[]
+}
+
+/** A saved custom snapshot of the inspector column and section placements. */
+export interface WebUiLayoutPresetDto {
+  id: string
+  name: string
+  column: WebUiColumnDto
+  sections: WebUiSectionPlacementDto[]
+}
+
+/** The versioned web UI layout document returned by /api/ui/layout. */
+export interface WebUiLayoutDto {
+  schemaVersion: number
+  updatedAtMs: number
+  activePresetId: string
+  column: WebUiColumnDto
+  sections: WebUiSectionPlacementDto[]
+  presets: WebUiLayoutPresetDto[]
+}
+
 /** A device control range, min inclusive / max inclusive. */
 export interface ControlRange {
   min: number

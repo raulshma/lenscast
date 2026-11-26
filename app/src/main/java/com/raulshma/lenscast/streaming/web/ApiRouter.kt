@@ -11,6 +11,8 @@ class ApiRouter(
     private val settings: SettingsWebHandler,
     /** GET/PUT /api/automation — the time-of-day automation state (session-auth-only writes, like settings). */
     private val automation: AutomationWebHandler,
+    /** GET/PUT/DELETE /api/ui/layout — the persisted inspector layout (session-auth-only writes). */
+    private val uiLayout: WebUiLayoutWebHandler,
     private val status: StatusWebHandler,
     private val stream: StreamWebHandler,
     private val capture: CaptureWebHandler,
@@ -63,6 +65,7 @@ class ApiRouter(
         "/api/settings" -> ApiResponse.ok(settings.get())
         "/api/settings/export" -> ApiResponse.ok(settings.export())
         "/api/automation" -> ApiResponse.ok(automation.get())
+        "/api/ui/layout" -> ApiResponse.ok(uiLayout.get())
         "/api/status" -> ApiResponse.ok(status.get())
         "/api/camera/lenses" -> ApiResponse.ok(lens.getLenses())
         "/api/stream/clients" -> ApiResponse.ok(stream.listClients())
@@ -99,6 +102,9 @@ class ApiRouter(
         "/api/settings" -> ApiResponse.ok(settings.put(r.body))
         "/api/settings/import" -> ApiResponse.ok(settings.import(r.body))
         "/api/automation" -> ApiResponse.ok(automation.put(r.body))
+        // Unlike the PUT/POST aliases above, layout writes are PUT-only.
+        // POST keeps the router's existing method-mismatch verdict: 404.
+        "/api/ui/layout" -> if (r.method == ApiMethod.PUT) ApiResponse.ok(uiLayout.put(r.body)) else null
         "/api/automation/test" -> ApiResponse.ok(automationTest.arm(r.body))
         "/api/automation/test/restore" -> ApiResponse.ok(automationTest.restore())
         "/api/settings/ml-model/download" -> ApiResponse.ok(settings.downloadModel())
@@ -141,6 +147,8 @@ class ApiRouter(
     }
 
     private suspend fun routeDelete(r: ApiRequest): ApiResponse? = when {
+        r.path == "/api/ui/layout" ->
+            ApiResponse.ok(uiLayout.reset())
         r.path == "/api/detection/events" ->
             ApiResponse.ok(detectionEvents.clear())
         r.path == "/api/audit" -> ApiResponse.ok(audit.clear())
@@ -200,6 +208,7 @@ class ApiRouter(
             Route(ApiMethod.GET, "/api/settings"),
             Route(ApiMethod.GET, "/api/settings/export"),
             Route(ApiMethod.GET, "/api/automation"),
+            Route(ApiMethod.GET, "/api/ui/layout"),
             Route(ApiMethod.GET, "/api/status"),
             Route(ApiMethod.GET, "/api/camera/lenses"),
             Route(ApiMethod.GET, "/api/stream/clients"),
@@ -218,11 +227,12 @@ class ApiRouter(
             Route(ApiMethod.GET, "/api/push/vapid-public"),
             Route(ApiMethod.GET, "/api/push/subscriptions"),
             Route(ApiMethod.GET, "/api/push/unifiedpush"),
-            // Writes (PUT shares the POST dispatch; both verbs are accepted)
+            // Writes (most PUT routes share the POST dispatch; UI layout is PUT-only)
             Route(ApiMethod.PUT, "/api/settings"),
             Route(ApiMethod.POST, "/api/settings"),
             Route(ApiMethod.PUT, "/api/automation"),
             Route(ApiMethod.POST, "/api/automation"),
+            Route(ApiMethod.PUT, "/api/ui/layout"),
             Route(ApiMethod.POST, "/api/automation/test"),
             Route(ApiMethod.POST, "/api/automation/test/restore"),
             Route(ApiMethod.POST, "/api/settings/import"),
@@ -262,6 +272,7 @@ class ApiRouter(
             Route(ApiMethod.POST, "/api/push/unifiedpush"),
             Route(ApiMethod.POST, "/api/push/unifiedpush/remove"),
             // Deletes
+            Route(ApiMethod.DELETE, "/api/ui/layout"),
             Route(ApiMethod.DELETE, "/api/detection/events"),
             Route(ApiMethod.DELETE, "/api/audit"),
             Route(ApiMethod.DELETE, "/api/push/subscriptions"),

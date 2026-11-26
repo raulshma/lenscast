@@ -1,5 +1,6 @@
 import { Show } from 'solid-js'
 import type { JSX } from 'solid-js'
+import { useInspectorSection } from './SettingItem'
 
 interface Props {
   /** Header title — Golos 600, sentence case. No section codes. */
@@ -20,22 +21,30 @@ interface Props {
  * console's section card.
  */
 export default function Panel(props: Props) {
+  const inspector = useInspectorSection()
+  const title = () => inspector?.title?.() ?? props.title
+  const allHidden = () => inspector?.allHidden?.() === true
   return (
     <section class={`nx-panel${props.class ? ` ${props.class}` : ''}`}>
-      <Show when={props.title || props.actions || props.badge}>
+      <Show when={title() || props.actions || inspector?.headerActions || props.badge}>
         <header class="nx-panel-header">
-          <Show when={props.title}>
-            <span class="nx-panel-title">{props.title}</span>
+          <Show when={title()}>
+            <span class="nx-panel-title">{title()}</span>
           </Show>
           {props.badge}
-          <Show when={props.actions}>
-            <div class="nx-panel-actions">{props.actions}</div>
+          <Show when={props.actions || inspector?.headerActions}>
+            <div class="nx-panel-actions">
+              {props.actions}
+              {inspector?.headerActions}
+            </div>
           </Show>
         </header>
       </Show>
-      <div class="nx-panel-body" classList={{ 'nx-panel-body-flush': props.flush === true }}>
-        {props.children}
-      </div>
+      <Show when={!allHidden()} fallback={inspector?.emptyState}>
+        <div class="nx-panel-body" classList={{ 'nx-panel-body-flush': props.flush === true }}>
+          {props.children}
+        </div>
+      </Show>
     </section>
   )
 }

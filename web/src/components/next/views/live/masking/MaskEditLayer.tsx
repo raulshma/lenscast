@@ -55,7 +55,7 @@ export default function MaskEditLayer(props: MaskEditLayerProps) {
   const covered = () => props.state.showShortcuts()
   // Keyed: a new session is a new editor, from a clean slate.
   return (
-    <Show when={session()} keyed>
+    <Show when={!props.state.isViewer() && session() ? session() : null} keyed>
       {(editor) => <MaskEditPicture editor={editor} media={() => props.media()} covered={covered} />}
     </Show>
   )

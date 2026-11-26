@@ -5,6 +5,7 @@ import { t } from '../../../../../lib/i18n'
 import { hashRouter } from '../../../../../lib/router'
 import { startMaskEdit } from '../../../../../lib/maskEditStore'
 import { Panel, FieldRow, ToggleField, Select, TextInput, SliderField, Button, Badge, Empty, Led } from '../../../ui'
+import { SettingItem, useInspectorSection } from '../../../ui/SettingItem'
 
 /** Wire value → i18n key for the masking-type options. */
 const MASK_KEYS: Record<MaskingType, string> = {
@@ -42,6 +43,11 @@ interface Props {
  * stream, the picture zones are drawn on.
  */
 export default function PrivacyMaskingPanel(props: Props) {
+  const inspector = useInspectorSection()
+  const readOnly = () => inspector?.readOnly() === true
+  const update = (patch: Partial<StreamingSettings>) => {
+    if (!readOnly()) props.onUpdate(patch)
+  }
   const s = () => props.streaming()
   const zones = () => s().maskingZones ?? []
   const [expandedZoneId, setExpandedZoneId] = createSignal<string | null>(null)
@@ -53,12 +59,12 @@ export default function PrivacyMaskingPanel(props: Props) {
   }
 
   function removeZone(id: string) {
-    props.onUpdate({ maskingZones: zones().filter((z) => z.id !== id) })
+    update({ maskingZones: zones().filter((z) => z.id !== id) })
     if (expandedZoneId() === id) setExpandedZoneId(null)
   }
 
   function updateZone(id: string, patch: Partial<MaskingZone>) {
-    props.onUpdate({
+    update({
       maskingZones: zones().map((z) => (z.id === id ? { ...z, ...patch } : z)),
     })
   }
@@ -69,6 +75,7 @@ export default function PrivacyMaskingPanel(props: Props) {
 
   /** Open the visual editor over the Live stage — on `zoneId`, when a row names its zone. */
   function openEditor(zoneId?: string) {
+    if (readOnly()) return
     startMaskEdit(zoneId)
     router.navigate({ name: 'live' })
   }
@@ -78,16 +85,20 @@ export default function PrivacyMaskingPanel(props: Props) {
       title={t('privacy.title')}
       badge={<Led tone={s().maskingEnabled ? 'ok' : 'off'} />}
     >
+      <SettingItem id="masking.enabled">
       <ToggleField
+        disabled={readOnly()}
         label={t('privacy.enable')}
         checked={s().maskingEnabled}
-        onChange={(v) => props.onUpdate({ maskingEnabled: v })}
+        onChange={(v) => update({ maskingEnabled: v })}
       />
+      </SettingItem>
 
       <Show when={s().maskingEnabled}>
         {/* The reason stands on the row as text, not only in the button's
             tooltip: a disabled button is not one a keyboard or screen
             reader user can reach to hear it. */}
+        <SettingItem id="masking.edit">
         <FieldRow
           label={t('privacy.zones', { count: zones().length })}
           hint={props.streamActive() ? undefined : t('privacy.streamOffHint')}
@@ -95,7 +106,7 @@ export default function PrivacyMaskingPanel(props: Props) {
           <Button
             size="sm"
             variant="primary"
-            disabled={!props.streamActive()}
+            disabled={!props.streamActive() || readOnly()}
             title={props.streamActive() ? t('privacy.editZoneTitle') : t('privacy.streamOffHint')}
             ariaLabel={t('privacy.editZoneTitle')}
             onClick={() => openEditor()}
@@ -103,9 +114,11 @@ export default function PrivacyMaskingPanel(props: Props) {
             {t('privacy.editZones')}
           </Button>
         </FieldRow>
+        </SettingItem>
 
         <For each={zones()}>
           {(zone) => (
+            <SettingItem id="masking.zones">
             <>
               {/* One zone per row. The row itself takes no click: its open
                   key is a real button, and the disclosure and the × beside
@@ -143,7 +156,7 @@ export default function PrivacyMaskingPanel(props: Props) {
                 <Button
                   class="nx-privacy-zone-open"
                   variant="ghost"
-                  disabled={!props.streamActive()}
+                  disabled={!props.streamActive() || readOnly()}
                   title={props.streamActive() ? t('privacy.editZoneTitle') : t('privacy.streamOffHint')}
                   ariaLabel={`${zoneName(zone)} · ${t('privacy.editZoneTitle')}`}
                   onClick={() => openEditor(zone.id)}
@@ -159,6 +172,7 @@ export default function PrivacyMaskingPanel(props: Props) {
                   size="sm"
                   variant="danger-soft"
                   icon
+                  disabled={readOnly()}
                   title={t('privacy.removeZone')}
                   ariaLabel={t('privacy.removeZone')}
                   onClick={() => removeZone(zone.id)}
@@ -171,6 +185,7 @@ export default function PrivacyMaskingPanel(props: Props) {
                 <div class="nx-list" style={{ 'padding-left': '24px' }}>
                   <FieldRow label={t('privacy.label')}>
                     <TextInput
+                      disabled={readOnly()}
                       small
                       value={zone.label}
                       placeholder={t('privacy.labelPlaceholder')}
@@ -180,6 +195,7 @@ export default function PrivacyMaskingPanel(props: Props) {
                   </FieldRow>
 
                   <ToggleField
+                    disabled={readOnly()}
                     label={t('privacy.enabled')}
                     checked={zone.enabled}
                     onChange={(v) => updateZone(zone.id, { enabled: v })}
@@ -187,6 +203,7 @@ export default function PrivacyMaskingPanel(props: Props) {
 
                   <FieldRow label={t('privacy.maskType')}>
                     <Select
+                      disabled={readOnly()}
                       small
                       value={zone.type}
                       options={Object.keys(MASKING_TYPE_LABELS).map((value) => ({ value, label: t(MASK_KEYS[value as MaskingType]) }))}
@@ -197,6 +214,7 @@ export default function PrivacyMaskingPanel(props: Props) {
 
                   <Show when={zone.type === 'PIXELATE'}>
                     <SliderField
+                      disabled={readOnly()}
                       label={t('privacy.pixelSize')}
                       display={`${zone.pixelateSize}px`}
                       min={4}
@@ -209,6 +227,7 @@ export default function PrivacyMaskingPanel(props: Props) {
 
                   <Show when={zone.type === 'BLUR'}>
                     <SliderField
+                      disabled={readOnly()}
                       label={t('privacy.blurRadius')}
                       display={String(Math.round(zone.blurRadius))}
                       min={1}
@@ -221,14 +240,17 @@ export default function PrivacyMaskingPanel(props: Props) {
                 </div>
               </Show>
             </>
+            </SettingItem>
           )}
         </For>
 
         {/* The beta panel's own empty state: privacy.empty names "Add Zone",
             a button only the classic card has. */}
+        <SettingItem id="masking.zones">
         <Show when={zones().length === 0}>
           <Empty title={t('privacy.editor.empty')} />
         </Show>
+        </SettingItem>
       </Show>
     </Panel>
   )

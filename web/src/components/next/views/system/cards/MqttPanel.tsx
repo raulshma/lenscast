@@ -4,6 +4,7 @@ import { API_DEFAULTS } from '../../../../../api/defaults'
 import { t } from '../../../../../lib/i18n'
 import { streamToggle } from '../../../../../lib/streamToggle'
 import { Panel, Field, FieldRow, ToggleField, TextInput } from '../../../ui'
+import { SettingItem, useInspectorSection } from '../../../ui/SettingItem'
 
 interface Props {
   settings: () => AllSettings | null
@@ -28,6 +29,14 @@ function clampPort(raw: string): number | null {
  * settings refresh.
  */
 export default function MqttPanel(props: Props) {
+  const inspector = useInspectorSection()
+  const readOnly = () => inspector?.readOnly() === true
+  const save = (patch: Partial<AllSettings['streaming']>) => {
+    if (!readOnly()) props.updateStreamingAndSave(patch)
+  }
+  const saveDebounced = (patch: Partial<AllSettings['streaming']>) => {
+    if (!readOnly()) props.updateStreamingDebounced(patch)
+  }
   const s = () => props.settings()
   const stream = () => s()?.streaming
   const mqttOn = () => stream()?.mqttEnabled ?? API_DEFAULTS.mqttEnabled
@@ -37,21 +46,26 @@ export default function MqttPanel(props: Props) {
   const mqttTelemetry = streamToggle(
     stream,
     'mqttTelemetryEnabled',
-    (patch) => props.updateStreamingAndSave(patch),
+    (patch) => save(patch),
   )
   const [passwordDraft, setPasswordDraft] = createSignal('')
 
   return (
     <Panel title={t('mqtt.title')}>
+      <SettingItem id="mqtt.enabled">
       <ToggleField
+        disabled={readOnly()}
         label={t('mqtt.enable')}
         hint={t('mqtt.desc')}
         checked={mqttOn()}
-        onChange={() => props.updateStreamingAndSave({ mqttEnabled: !mqttOn() })}
+        onChange={() => save({ mqttEnabled: !mqttOn() })}
       />
+      </SettingItem>
 
+      <SettingItem id="mqtt.connection">
       <Show when={mqttOn()}>
         <ToggleField
+          disabled={readOnly()}
           label={t('mqtt.telemetry')}
           hint={t('mqtt.telemetryDesc')}
           checked={mqttTelemetry.checked()}
@@ -59,17 +73,19 @@ export default function MqttPanel(props: Props) {
         />
         <Field label={t('mqtt.host')}>
           <TextInput
+            disabled={readOnly()}
             mono
             type="text"
             placeholder={t('mqtt.hostPlaceholder')}
             value={stream()?.mqttBrokerHost ?? API_DEFAULTS.mqttBrokerHost}
-            onInput={(v) => props.updateStreamingDebounced({ mqttBrokerHost: v })}
+            onInput={(v) => saveDebounced({ mqttBrokerHost: v })}
             ariaLabel={t('mqtt.host')}
           />
         </Field>
 
         <FieldRow label={t('mqtt.port')}>
           <TextInput
+            disabled={readOnly()}
             class="nx-input-num"
             type="number"
             small
@@ -77,35 +93,38 @@ export default function MqttPanel(props: Props) {
             value={String(stream()?.mqttBrokerPort ?? API_DEFAULTS.mqttBrokerPort)}
             onInput={(raw) => {
               const v = clampPort(raw)
-              if (v !== null) props.updateStreamingDebounced({ mqttBrokerPort: v })
+              if (v !== null) saveDebounced({ mqttBrokerPort: v })
             }}
             ariaLabel={t('mqtt.port')}
           />
         </FieldRow>
 
         <ToggleField
+          disabled={readOnly()}
           label={t('mqtt.tls')}
           checked={mqttTlsOn()}
-          onChange={() => props.updateStreamingAndSave({ mqttTls: !mqttTlsOn() })}
+          onChange={() => save({ mqttTls: !mqttTlsOn() })}
         />
 
         <Field label={t('common.username')}>
           <TextInput
+            disabled={readOnly()}
             type="text"
             value={stream()?.mqttUsername ?? API_DEFAULTS.mqttUsername}
-            onInput={(v) => props.updateStreamingDebounced({ mqttUsername: v })}
+            onInput={(v) => saveDebounced({ mqttUsername: v })}
             ariaLabel={t('common.username')}
           />
         </Field>
 
         <Field label={t('common.password')}>
           <TextInput
+            disabled={readOnly()}
             type="password"
             placeholder={t('common.unchanged')}
             value={passwordDraft()}
             onInput={(v) => {
               setPasswordDraft(v)
-              props.updateStreamingDebounced({ mqttPassword: v })
+              saveDebounced({ mqttPassword: v })
             }}
             ariaLabel={t('common.password')}
           />
@@ -113,15 +132,17 @@ export default function MqttPanel(props: Props) {
 
         <Field label={t('mqtt.prefix')}>
           <TextInput
+            disabled={readOnly()}
             mono
             type="text"
             placeholder={t('mqtt.prefixPlaceholder')}
             value={stream()?.mqttDiscoveryPrefix ?? API_DEFAULTS.mqttDiscoveryPrefix}
-            onInput={(v) => props.updateStreamingDebounced({ mqttDiscoveryPrefix: v })}
+            onInput={(v) => saveDebounced({ mqttDiscoveryPrefix: v })}
             ariaLabel={t('mqtt.prefix')}
           />
         </Field>
       </Show>
+      </SettingItem>
     </Panel>
   )
 }

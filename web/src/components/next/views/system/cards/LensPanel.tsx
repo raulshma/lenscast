@@ -3,6 +3,7 @@ import type { LensInfo } from '../../../../../types'
 import { t } from '../../../../../lib/i18n'
 import { fmtFocalLength, lensLabel } from '../../../../../lib/cameraLabels'
 import { Panel } from '../../../ui'
+import { SettingItem, useInspectorSection } from '../../../ui/SettingItem'
 
 interface Props {
   lenses: () => LensInfo[]
@@ -15,25 +16,34 @@ interface Props {
  * wrap row of kit chips (active chip = selected lens).
  */
 export default function LensPanel(props: Props) {
+  const inspector = useInspectorSection()
+  const readOnly = () => inspector?.readOnly() === true
+  const selectLens = (index: number) => {
+    if (!readOnly()) props.handleSelectLens(index)
+  }
+
   return (
-    <Panel title={t('system.section.lens')}>
-      <div role="group" aria-label={t('system.section.lens')} style={{ display: 'flex', 'flex-wrap': 'wrap', gap: '6px' }}>
-        <For each={props.lenses()}>
-          {(lens) => (
-            <button
-              type="button"
-              class="nx-chip nx-lens-chip"
-              classList={{ 'nx-chip-active': lens.selected }}
-              onClick={() => props.handleSelectLens(lens.index)}
-            >
-              <span>{lensLabel(lens)}</span>
-              <Show when={fmtFocalLength(lens.focalLength)}>
-                <span class="nx-mono">{fmtFocalLength(lens.focalLength)}</span>
-              </Show>
-            </button>
-          )}
-        </For>
-      </div>
-    </Panel>
+    <SettingItem id="lens.select">
+      <Panel title={t('system.section.lens')}>
+        <div role="group" aria-label={t('system.section.lens')} style={{ display: 'flex', 'flex-wrap': 'wrap', gap: '6px' }}>
+          <For each={props.lenses()}>
+            {(lens) => (
+              <button
+                type="button"
+                class="nx-chip nx-lens-chip"
+                classList={{ 'nx-chip-active': lens.selected }}
+                disabled={readOnly()}
+                onClick={() => selectLens(lens.index)}
+              >
+                <span>{lensLabel(lens)}</span>
+                <Show when={fmtFocalLength(lens.focalLength)}>
+                  <span class="nx-mono">{fmtFocalLength(lens.focalLength)}</span>
+                </Show>
+              </button>
+            )}
+          </For>
+        </div>
+      </Panel>
+    </SettingItem>
   )
 }

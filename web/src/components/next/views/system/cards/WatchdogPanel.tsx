@@ -4,6 +4,7 @@ import { getSystemInfo } from '../../../../../api/client'
 import { API_DEFAULTS } from '../../../../../api/defaults'
 import { formatTime, t } from '../../../../../lib/i18n'
 import { Panel, ToggleField, SliderField, FieldRow, Badge, Led, type BadgeTone, type LedTone } from '../../../ui'
+import { SettingItem, useInspectorSection } from '../../../ui/SettingItem'
 
 interface Props {
   settings: () => AllSettings | null
@@ -48,6 +49,14 @@ const STATE_LEDS: Record<string, LedTone> = {
  * independent of the watchdog toggle.
  */
 export default function WatchdogPanel(props: Props) {
+  const inspector = useInspectorSection()
+  const readOnly = () => inspector?.readOnly() === true
+  const save = (patch: Partial<AllSettings['streaming']>) => {
+    if (!readOnly()) props.updateStreamingAndSave(patch)
+  }
+  const saveDebounced = (patch: Partial<AllSettings['streaming']>) => {
+    if (!readOnly()) props.updateStreamingDebounced(patch)
+  }
   const s = () => props.settings()
   const wd = () => props.status()?.watchdog
   const enabled = () => s()?.streaming?.watchdogEnabled ?? API_DEFAULTS.watchdogEnabled
@@ -81,24 +90,30 @@ export default function WatchdogPanel(props: Props) {
       }
     >
       {/* Enable Toggle */}
+      <SettingItem id="watchdog.enabled">
       <ToggleField
+        disabled={readOnly()}
         label={t('watchdog.enable')}
         checked={enabled()}
-        onChange={() => props.updateStreamingAndSave({ watchdogEnabled: !enabled() })}
+        onChange={() => save({ watchdogEnabled: !enabled() })}
       />
       <div class="nx-banner nx-banner-neutral" role="note" aria-live="polite">
         {t('watchdog.desc')}
       </div>
+      </SettingItem>
 
+      <SettingItem id="watchdog.fsiResume">
       {/* Camera Resume Prompt (opt-in, default off) */}
       <ToggleField
+        disabled={readOnly()}
         label={t('watchdog.fsiResume')}
         checked={fsiResume()}
-        onChange={() => props.updateStreamingAndSave({ fsiCameraResumeEnabled: !fsiResume() })}
+        onChange={() => save({ fsiCameraResumeEnabled: !fsiResume() })}
       />
       <div class="nx-banner nx-banner-neutral" role="note" aria-live="polite">
         {t('watchdog.fsiResume.desc')}
       </div>
+      </SettingItem>
 
       {/* Crash guard + heartbeat telemetry (spec item 7): every state the
           overnight run relies on, dashboard-visible. Both run regardless of
@@ -106,6 +121,7 @@ export default function WatchdogPanel(props: Props) {
           not the session), so these lines are not gated on `enabled()`.
           GIVE_UP warns — the handler has stopped arming and only the OS
           sticky restart is left. */}
+      <SettingItem id="watchdog.crashGuard">
       <Show when={crashGuard()}>
         <FieldRow label={t('watchdog.crashGuard')}>
           <span
@@ -116,6 +132,8 @@ export default function WatchdogPanel(props: Props) {
           </span>
         </FieldRow>
       </Show>
+      </SettingItem>
+      <SettingItem id="watchdog.heartbeat">
       <Show when={heartbeat()}>
         <FieldRow label={t('watchdog.heartbeat')}>
           <span class="nx-mono nx-info-value">
@@ -125,6 +143,7 @@ export default function WatchdogPanel(props: Props) {
           </span>
         </FieldRow>
       </Show>
+      </SettingItem>
 
       <Show when={enabled()}>
         {/* Max Retries */}
@@ -135,7 +154,7 @@ export default function WatchdogPanel(props: Props) {
           max={API_DEFAULTS.watchdogMaxRetriesMax}
           step={1}
           value={s()?.streaming?.watchdogMaxRetries ?? API_DEFAULTS.watchdogMaxRetries}
-          onChange={(v) => props.updateStreamingDebounced({ watchdogMaxRetries: v })}
+          onChange={(v) => saveDebounced({ watchdogMaxRetries: v })}
         />
 
         {/* Check Interval */}
@@ -146,7 +165,7 @@ export default function WatchdogPanel(props: Props) {
           max={API_DEFAULTS.watchdogCheckIntervalMaxSeconds}
           step={1}
           value={s()?.streaming?.watchdogCheckIntervalSeconds ?? API_DEFAULTS.watchdogCheckIntervalSeconds}
-          onChange={(v) => props.updateStreamingDebounced({ watchdogCheckIntervalSeconds: v })}
+          onChange={(v) => saveDebounced({ watchdogCheckIntervalSeconds: v })}
         />
 
         {/* Live Status */}

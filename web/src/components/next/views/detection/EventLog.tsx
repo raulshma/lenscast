@@ -6,6 +6,7 @@ import { collectLabels, filterEvents, type EventFilter } from '../../../../hooks
 import { openMedia } from '../../../../lib/viewerStore'
 import { formatDateTime, t, tCount } from '../../../../lib/i18n'
 import { Panel, Led, Badge, Segmented, Empty, Button } from '../../ui'
+import { SettingItem, useInspectorSection } from '../../ui/SettingItem'
 
 const TYPE_FILTERS: { value: EventFilter['type']; label: () => string }[] = [
   { value: 'all', label: () => t('events.filter.all') },
@@ -69,6 +70,8 @@ const MODE_LEDS = { live: 'ok', polling: 'warn', connecting: 'off' } as const
  * genuine fault (tamper) speaks red.
  */
 export default function EventLog(props: { readOnly?: () => boolean } = {}) {
+  const inspector = useInspectorSection()
+  const readOnly = () => props.readOnly?.() === true || inspector?.readOnly() === true
   const { events, mode, clear } = useEventStream()
   const [typeFilter, setTypeFilter] = createSignal<EventFilter['type']>('all')
   const [labelFilter, setLabelFilter] = createSignal<string | null>(null)
@@ -81,7 +84,8 @@ export default function EventLog(props: { readOnly?: () => boolean } = {}) {
   const knownLabels = () => collectLabels(events())
 
   return (
-    <Panel
+    <SettingItem id="events.list">
+      <Panel
       title={t('events.title')}
       badge={
         <Badge tone="neutral" mono>
@@ -97,7 +101,7 @@ export default function EventLog(props: { readOnly?: () => boolean } = {}) {
           <a class="nx-btn nx-btn-ghost nx-btn-sm" href={detectionEventsExportUrl('json', exportFilter())} download="lenscast-events.json">
             JSON
           </a>
-          <Show when={props.readOnly?.() !== true}>
+          <Show when={!readOnly()}>
             <Button size="sm" variant="ghost" disabled={events().length === 0} onClick={clear} ariaLabel={t('events.clearAll')}>
               {t('events.clearAll')}
             </Button>
@@ -198,6 +202,7 @@ export default function EventLog(props: { readOnly?: () => boolean } = {}) {
           </For>
         </div>
       </Show>
-    </Panel>
+      </Panel>
+    </SettingItem>
   )
 }

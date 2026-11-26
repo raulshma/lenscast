@@ -1,9 +1,16 @@
 package com.raulshma.lenscast.data
 
 import android.app.Application
+import androidx.datastore.preferences.core.stringPreferencesKey
 import com.raulshma.lenscast.core.StreamDefaults
+import com.raulshma.lenscast.streaming.model.WebUiColumnDto
+import com.raulshma.lenscast.streaming.model.WebUiLayoutDto
+import com.raulshma.lenscast.streaming.model.WebUiLayoutPresetDto
+import com.raulshma.lenscast.streaming.model.WebUiSectionPlacementDto
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
 import com.raulshma.lenscast.streaming.rtsp.rtspAuthSpecFromPrefs
+import com.raulshma.lenscast.streaming.web.WebUiLayoutPolicy
+import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.runBlocking
@@ -67,6 +74,121 @@ class SettingsDataStoreDiskReadTest {
         assertEquals(StreamDefaults.RTSP_PORT_MAX, store.disk(rtspPortPref))
         assertEquals("rtmp://edge/live", store.disk(rtmpUrlPref))
         assertEquals(RtspInputFormat.NV12, store.disk(rtspInputFormatPref))
+    }
+
+    @Test
+    fun `layout save sanitizes once and the disk twin survives a fresh store while its flow placeholders`() = runBlocking {
+        val raw = WebUiLayoutDto(
+            schemaVersion = 99,
+            updatedAtMs = 1_700_000_000_123L,
+            activePresetId = "  night  ",
+            column = WebUiColumnDto(StreamDefaults.COLUMN_WIDTH_MAX_PX + 100, "unknown", true),
+            sections = listOf(
+                WebUiSectionPlacementDto(
+                    id = "",
+                    kind = "builtin",
+                    sectionId = " lens ",
+                    hiddenItems = listOf(" lens.iso ", "lens.iso"),
+                ),
+                WebUiSectionPlacementDto(
+                    id = "custom",
+                    kind = "custom",
+                    customTitle = "  Rig  ",
+                    items = listOf("camera.iso", "camera.iso"),
+                ),
+            ),
+            presets = listOf(
+                WebUiLayoutPresetDto(
+                    id = "",
+                    name = "  Night  ",
+                    column = WebUiColumnDto(1, "bogus"),
+                    sections = listOf(WebUiSectionPlacementDto(id = "", kind = "builtin", sectionId = "clients")),
+                ),
+            ),
+        )
+        store.saveWebUiLayout(raw)
+        val persisted = store.webUiLayoutFromDisk()
+
+        // The parked share-in still exposes the default-first placeholder;
+        // both the disk twin and the bytes on disk carry the saved truth.
+        assertEquals(WebUiLayoutPolicy.defaultLayout(), store.webUiLayout.value)
+        assertEquals(StreamDefaults.WEB_UI_LAYOUT_SCHEMA_VERSION, persisted.schemaVersion)
+        assertEquals(1_700_000_000_123L, persisted.updatedAtMs)
+        assertEquals("night", persisted.activePresetId)
+        assertEquals(WebUiColumnDto(StreamDefaults.COLUMN_WIDTH_MAX_PX, "custom", true), persisted.column)
+        assertEquals(2, persisted.sections.size)
+        assertEquals(2, persisted.sections.map { it.id }.toSet().size)
+        assertEquals(listOf("lens", "custom-custom"), persisted.sections.map { it.sectionId })
+        UUID.fromString(persisted.sections[0].id)
+        assertEquals(listOf("lens.iso"), persisted.sections[0].hiddenItems)
+        assertEquals(emptyList<String>(), persisted.sections[0].items)
+        assertEquals("custom", persisted.sections[1].id)
+        assertEquals("Rig", persisted.sections[1].customTitle)
+        assertEquals(listOf("camera.iso"), persisted.sections[1].items)
+        assertEquals(emptyList<String>(), persisted.sections[1].hiddenItems)
+        val preset = persisted.presets.single()
+        assertEquals("Night", preset.name)
+        assertEquals(WebUiColumnDto(StreamDefaults.COLUMN_WIDTH_MIN_PX, "custom"), preset.column)
+        assertEquals(listOf("clients"), preset.sections.map { it.sectionId })
+        UUID.fromString(preset.id)
+        UUID.fromString(preset.sections.single().id)
+        assertEquals("save-side sanitization is not idempotent", persisted, WebUiLayoutPolicy.sanitize(persisted))
+        assertEquals("", raw.sections.first().id) // the caller's graph was not mutated
+        val layoutKey = stringPreferencesKey("web_ui_layout_json")
+        assertEquals(serializeWebUiLayout(persisted), store.readFresh { it[layoutKey] })
+
+        // A new store over the same DataStore file starts with the same
+        // placeholder but its disk twin reads the persisted identities and
+        // server timestamp, not a re-minted/default document.
+        val reopened = SettingsDataStore(
+            RuntimeEnvironment.getApplication(),
+            CoroutineScope(SupervisorJob() + parkedDispatcher()),
+        )
+        assertEquals(WebUiLayoutPolicy.defaultLayout(), reopened.webUiLayout.value)
+        assertEquals(persisted, reopened.webUiLayoutFromDisk())
+    }
+
+    @Test
+    fun `corrupt layout JSON reads as the exact default and a later save heals the bytes`() = runBlocking {
+        val layoutKey = stringPreferencesKey("web_ui_layout_json")
+        // A test-only raw string descriptor plants corrupt bytes under the
+        // production key. The production layout descriptor always sanitizes
+        // its writes, so going through it could not exercise corrupt decode.
+        val rawJsonPref = SettingPref(
+            default = "",
+            decode = { prefs -> prefs[layoutKey].orEmpty() },
+            encode = { prefs, value -> prefs[layoutKey] = value },
+        )
+        assertEquals(WebUiLayoutPolicy.defaultLayout(), store.webUiLayoutFromDisk())
+
+        val corrupt = listOf(
+            "{not json",
+            "null",
+            "[]",
+            """{"column":null}""",
+            """{"sections":[null]}""",
+            """{"presets":[{"id":"p","name":"Night","sections":[42]}]}""",
+        )
+        for (json in corrupt) {
+            store.saveEntries(listOf(SettingEntry(rawJsonPref, json)))
+            assertEquals("corrupt payload: $json", WebUiLayoutPolicy.defaultLayout(), store.webUiLayoutFromDisk())
+            assertEquals(WebUiLayoutPolicy.defaultLayout(), store.webUiLayout.value)
+        }
+
+        val reopened = SettingsDataStore(
+            RuntimeEnvironment.getApplication(),
+            CoroutineScope(SupervisorJob() + parkedDispatcher()),
+        )
+        assertEquals(WebUiLayoutPolicy.defaultLayout(), reopened.webUiLayoutFromDisk())
+
+        val healed = WebUiLayoutPolicy.defaultLayout().copy(
+            updatedAtMs = 42L,
+            activePresetId = "night",
+            sections = listOf(WebUiSectionPlacementDto(id = "lens", kind = "builtin", sectionId = "lens")),
+        )
+        reopened.saveWebUiLayout(healed)
+        assertEquals(healed, reopened.webUiLayoutFromDisk())
+        assertEquals(serializeWebUiLayout(healed), reopened.readFresh { it[layoutKey] })
     }
 
     @Test

@@ -272,6 +272,29 @@ object OpenApiSpec {
             ),
         )
 
+        // ── web UI layout ──
+        path(
+            "/api/ui/layout",
+            "get" to operation(
+                listOf("ui"),
+                "Read the persisted inspector column, ordered sections, and custom presets",
+                mapOf("200" to ok("WebUiLayoutDto")),
+            ),
+            "put" to operation(
+                listOf("ui"),
+                "Save the sanitized inspector layout (administrator session only)",
+                mapOf("200" to ok("WebUiLayoutDto")),
+                requestBody = jsonBody("WebUiLayoutDto"),
+                security = listOf(mapOf("sessionCookie" to emptyList<String>())),
+            ),
+            "delete" to operation(
+                listOf("ui"),
+                "Restore and return the default inspector layout (administrator session only)",
+                mapOf("200" to ok("WebUiLayoutDto")),
+                security = listOf(mapOf("sessionCookie" to emptyList<String>())),
+            ),
+        )
+
         // ── status / system ──
         path(
             "/api/status",
@@ -871,6 +894,46 @@ object OpenApiSpec {
             "rules" to arrayOf(ref("AutomationRule")),
             description = "The PUT body: the toggle and the full rule list persist wholesale. The catalogs and limits " +
                 "are read-only on the wire and never accepted here.",
+        ),
+        "WebUiLayoutDto" to schema(
+            "schemaVersion" to intSchema("The persisted layout schema version"),
+            "updatedAtMs" to intSchema("The device timestamp of the last successful save or reset"),
+            "activePresetId" to stringSchema("The active built-in or custom preset id"),
+            "column" to ref("WebUiColumnDto"),
+            "sections" to arrayOf(ref("WebUiSectionPlacementDto")),
+            "presets" to arrayOf(ref("WebUiLayoutPresetDto")),
+            required = listOf("schemaVersion", "updatedAtMs", "activePresetId", "column", "sections", "presets"),
+            fixture = "ui-layout.json",
+        ),
+        "WebUiColumnDto" to schema(
+            "widthPx" to intSchema("The inspector column width in pixels"),
+            "widthPreset" to (stringSchema("The named width preset") +
+                mapOf("enum" to listOf("compact", "default", "wide", "custom"))),
+            "collapsed" to boolSchema("Whether the inspector column is collapsed"),
+            required = listOf("widthPx", "widthPreset", "collapsed"),
+            fixture = "ui-layout.json#/column",
+        ),
+        "WebUiSectionPlacementDto" to schema(
+            "id" to stringSchema("The stable placement id"),
+            "kind" to (stringSchema("Built-in or user-authored custom section") +
+                mapOf("enum" to listOf("builtin", "custom"))),
+            "sectionId" to stringSchema("The built-in section id, or the custom section's derived id"),
+            "visible" to boolSchema("Whether the placement is shown"),
+            "collapsed" to boolSchema("Whether the placement starts collapsed"),
+            "hiddenItems" to arrayOf(stringSchema("A hidden built-in item id")),
+            "customTitle" to (stringSchema("The user-authored custom section title; null for built-ins") +
+                mapOf("nullable" to true)),
+            "items" to arrayOf(stringSchema("An item id in a custom section")),
+            required = listOf("id", "kind", "sectionId", "visible", "collapsed", "hiddenItems", "items"),
+            fixture = "ui-layout.json#/sections/0",
+        ),
+        "WebUiLayoutPresetDto" to schema(
+            "id" to stringSchema("The stable custom preset id"),
+            "name" to stringSchema("The user-authored preset name"),
+            "column" to ref("WebUiColumnDto"),
+            "sections" to arrayOf(ref("WebUiSectionPlacementDto")),
+            required = listOf("id", "name", "column", "sections"),
+            fixture = "ui-layout.json#/presets/0",
         ),
         "AutomationRule" to schema(
             "id" to stringSchema("Stable identity (the fire-journal key); blank/absent lets the device mint a UUID. " +

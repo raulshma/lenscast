@@ -2,6 +2,7 @@ import { For, Show } from 'solid-js'
 import type { NextState } from '../../NextState'
 import { t } from '../../../../lib/i18n'
 import { Led, Panel, type LedTone } from '../../ui'
+import { SettingItem } from '../../ui/SettingItem'
 import { channelStates, type ChannelState } from '../../lib/telemetry'
 
 /**
@@ -67,34 +68,36 @@ export default function ChannelMatrix(props: { state: NextState }) {
   }
 
   return (
-    <Panel title={t('next.channels')} badge={<Led tone={state.streamActionLoading() ? 'warn' : 'off'} />}>
-      <For each={channelStates(state.status())}>
-        {(channel) => (
-          <div class="nx-channel">
-            <div class="nx-channel-head">
-              <Led tone={ledTone(channel)} />
-              <span class="nx-channel-code">{channel.code}</span>
-              <span class={`nx-channel-status ${statusTone(channel)}`}>{statusText(channel)}</span>
-              <Show when={canToggle(channel)}>
-                <button
-                  type="button"
-                  class="nx-channel-btn"
-                  classList={{ 'nx-channel-btn-stop': channel.active }}
-                  disabled={state.streamActionLoading()}
-                  onClick={() => toggle(channel)}
-                >
-                  {channel.active ? t('common.stop') : t('common.start')}
-                </button>
+    <SettingItem id="channels.status">
+      <Panel title={t('next.channels')} badge={<Led tone={state.streamActionLoading() ? 'warn' : 'off'} />}>
+        <For each={channelStates(state.status())}>
+          {(channel) => (
+            <div class="nx-channel">
+              <div class="nx-channel-head">
+                <Led tone={ledTone(channel)} />
+                <span class="nx-channel-code">{channel.code}</span>
+                <span class={`nx-channel-status ${statusTone(channel)}`}>{statusText(channel)}</span>
+                <Show when={canToggle(channel)}>
+                  <button
+                    type="button"
+                    class="nx-channel-btn"
+                    classList={{ 'nx-channel-btn-stop': channel.active }}
+                    disabled={state.streamActionLoading()}
+                    onClick={() => toggle(channel)}
+                  >
+                    {channel.active ? t('common.stop') : t('common.start')}
+                  </button>
+                </Show>
+              </div>
+              <Show when={channel.error}>
+                <div class="nx-banner nx-banner-danger nx-channel-error" role="alert">
+                  {channel.error}
+                </div>
               </Show>
             </div>
-            <Show when={channel.error}>
-              <div class="nx-banner nx-banner-danger nx-channel-error" role="alert">
-                {channel.error}
-              </div>
-            </Show>
-          </div>
-        )}
-      </For>
-    </Panel>
+          )}
+        </For>
+      </Panel>
+    </SettingItem>
   )
 }

@@ -15,6 +15,7 @@ import {
 import { SNAPSHOT_PATH, tileBadgeKind, tileRung } from '../../../../../lib/tileRung'
 import { t, tCount } from '../../../../../lib/i18n'
 import { Panel, FieldRow, TextInput, Button } from '../../../ui'
+import { SettingItem, useInspectorSection } from '../../../ui/SettingItem'
 
 /**
  * Known limitation: browsers cannot browse mDNS (.local) names, so remote
@@ -97,7 +98,9 @@ function CameraTile(props: {
   onRemove: (id: string) => void
   onUpdate: (id: string, patch: Partial<Pick<SavedCamera, 'name' | 'baseUrl' | 'mode' | 'auth' | 'refreshMs'>>) => void
   captureStatus: () => CaptureStatus | undefined
+  readOnly: () => boolean
 }) {
+  const readOnly = () => props.readOnly()
   // Tiles with credentials are snapshot-only (see the component comment).
   const [mode, setMode] = createSignal<TileMode>(props.camera.auth ? 'snapshot' : normalizeMode(props.camera.mode))
   const [liveBroken, setLiveBroken] = createSignal(false)
@@ -205,6 +208,7 @@ function CameraTile(props: {
   const badgeKind = createMemo(() => tileBadgeKind(status(), mode()))
 
   function startEdit() {
+    if (readOnly()) return
     setEditName(props.camera.name)
     setEditUrl(props.camera.baseUrl)
     setEditAuthKind(props.camera.auth?.kind ?? 'none')
@@ -229,6 +233,7 @@ function CameraTile(props: {
   }
 
   function saveEdit() {
+    if (readOnly()) return
     const normalized = normalizeBaseUrl(editUrl())
     if (!normalized) {
       setEditError(t('multicam.invalidUrl'))
@@ -244,7 +249,7 @@ function CameraTile(props: {
   }
 
   function toggleMode() {
-    if (props.camera.auth) return // snapshot-only, see above
+    if (readOnly() || props.camera.auth) return // snapshot-only, see above
     const next: TileMode = mode() === 'snapshot' ? 'live' : 'snapshot'
     setStatus('loading')
     setLiveBroken(false)
@@ -320,14 +325,16 @@ function CameraTile(props: {
               type="text"
               placeholder={t('multicam.edit.name')}
               value={editName()}
-              onInput={(e) => setEditName(e.currentTarget.value)}
+              disabled={readOnly()}
+              onInput={(e) => { if (!readOnly()) setEditName(e.currentTarget.value) }}
             />
             <input
               class="field-input multicam-edit-input"
               type="text"
               placeholder="http://192.168.1.55:8080"
               value={editUrl()}
-              onInput={(e) => setEditUrl(e.currentTarget.value)}
+              disabled={readOnly()}
+              onInput={(e) => { if (!readOnly()) setEditUrl(e.currentTarget.value) }}
             />
             <div class="multicam-edit-row">
               <label class="multicam-edit-label" for={`multicam-auth-${props.camera.id}`}>{t('multicam.edit.auth')}</label>
@@ -335,7 +342,8 @@ function CameraTile(props: {
                 id={`multicam-auth-${props.camera.id}`}
                 class="field-select multicam-edit-select"
                 value={editAuthKind()}
-                onChange={(e) => setEditAuthKind(e.currentTarget.value as 'none' | 'token' | 'basic')}
+                disabled={readOnly()}
+                onChange={(e) => { if (!readOnly()) setEditAuthKind(e.currentTarget.value as 'none' | 'token' | 'basic') }}
               >
                 <option value="none">{t('multicam.edit.authNone')}</option>
                 <option value="token">{t('multicam.edit.authToken')}</option>
@@ -349,7 +357,8 @@ function CameraTile(props: {
                 placeholder={t('multicam.edit.tokenPlaceholder')}
                 autocomplete="off"
                 value={editToken()}
-                onInput={(e) => setEditToken(e.currentTarget.value)}
+                disabled={readOnly()}
+                onInput={(e) => { if (!readOnly()) setEditToken(e.currentTarget.value) }}
               />
             </Show>
             <Show when={editAuthKind() === 'basic'}>
@@ -359,7 +368,8 @@ function CameraTile(props: {
                 placeholder={t('multicam.edit.userPlaceholder')}
                 autocomplete="off"
                 value={editUser()}
-                onInput={(e) => setEditUser(e.currentTarget.value)}
+                disabled={readOnly()}
+                onInput={(e) => { if (!readOnly()) setEditUser(e.currentTarget.value) }}
               />
               <input
                 class="field-input multicam-edit-input"
@@ -367,7 +377,8 @@ function CameraTile(props: {
                 placeholder={t('multicam.edit.passPlaceholder')}
                 autocomplete="off"
                 value={editPass()}
-                onInput={(e) => setEditPass(e.currentTarget.value)}
+                disabled={readOnly()}
+                onInput={(e) => { if (!readOnly()) setEditPass(e.currentTarget.value) }}
               />
             </Show>
             <div class="multicam-edit-row">
@@ -376,7 +387,8 @@ function CameraTile(props: {
                 id={`multicam-refresh-${props.camera.id}`}
                 class="field-select multicam-edit-select"
                 value={String(editRefreshMs())}
-                onChange={(e) => setEditRefreshMs(Number(e.currentTarget.value))}
+                disabled={readOnly()}
+                onChange={(e) => { if (!readOnly()) setEditRefreshMs(Number(e.currentTarget.value)) }}
               >
                 <For each={REFRESH_CHOICES}>
                   {(ms) => <option value={String(ms)}>{ms === 5000 ? t('multicam.refresh.default') : `${ms / 1000} s`}</option>}
@@ -392,7 +404,7 @@ function CameraTile(props: {
               <span class="multicam-form-error">{editError()}</span>
             </Show>
             <div class="multicam-edit-actions">
-              <Button size="sm" variant="ghost" onClick={saveEdit}>
+              <Button size="sm" variant="ghost" onClick={saveEdit} disabled={readOnly()}>
                 {t('common.save')}
               </Button>
               <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>
@@ -406,7 +418,7 @@ function CameraTile(props: {
             <button
               type="button"
               class="multicam-mini-btn"
-              disabled={!!props.camera.auth}
+              disabled={!!props.camera.auth || readOnly()}
               title={props.camera.auth
                 ? t('multicam.tile.authLive')
                 : mode() === 'snapshot' ? t('multicam.tile.toLive') : t('multicam.tile.toSnapshots')}
@@ -423,14 +435,15 @@ function CameraTile(props: {
             >
               {t('multicam.tile.dashboard')}
             </a>
-            <button type="button" class="multicam-mini-btn" title={t('multicam.tile.editTitle')} onClick={startEdit}>
+            <button type="button" class="multicam-mini-btn" title={t('multicam.tile.editTitle')} onClick={startEdit} disabled={readOnly()}>
               {t('multicam.tile.edit')}
             </button>
             <button
               type="button"
               class="multicam-mini-btn multicam-mini-btn-danger"
               title={t('multicam.tile.removeTitle')}
-              onClick={() => props.onRemove(props.camera.id)}
+              disabled={readOnly()}
+              onClick={() => { if (!readOnly()) props.onRemove(props.camera.id) }}
             >
               {t('multicam.tile.remove')}
             </button>
@@ -458,6 +471,8 @@ function CameraTile(props: {
  * classic multicam-* markup; the card chrome and buttons are the kit's.
  */
 export default function MultiCamPanel() {
+  const inspector = useInspectorSection()
+  const readOnly = () => inspector?.readOnly() === true
   const [cameras, setCameras] = createSignal<SavedCamera[]>([])
   const [hydrated, setHydrated] = createSignal(false)
   const [capturing, setCapturing] = createSignal(false)
@@ -467,6 +482,7 @@ export default function MultiCamPanel() {
   const [formError, setFormError] = createSignal('')
 
   function update(patch: (current: SavedCamera[]) => SavedCamera[]) {
+    if (readOnly()) return
     setCameras((current) => {
       const next = patch(current)
       persistCameras(next)
@@ -476,6 +492,7 @@ export default function MultiCamPanel() {
 
   function addCamera(e: Event) {
     e.preventDefault()
+    if (readOnly()) return
     const normalized = normalizeBaseUrl(url())
     if (!normalized) {
       setFormError(t('multicam.invalidUrl'))
@@ -510,7 +527,7 @@ export default function MultiCamPanel() {
    * the capture; the outcome is just unverifiable from the browser).
    */
   async function captureAll() {
-    if (capturing()) return
+    if (readOnly() || capturing()) return
     const targets = [...cameras()]
     if (targets.length === 0) return
     // A newer volley supersedes the previous one's pending reset — but a
@@ -545,24 +562,25 @@ export default function MultiCamPanel() {
   })
 
   return (
-    <Panel title={t('multicam.title')}>
+    <SettingItem id="multicam.list">
+      <Panel title={t('multicam.title')}>
       <FieldRow label={tCount('multicam.count', cameras().length)}>
         <div class="nx-deterrence">
           <Button
             size="sm"
             variant="ghost"
-            disabled={cameras().length === 0 || capturing()}
+            disabled={readOnly() || cameras().length === 0 || capturing()}
             title={t('multicam.captureAllTitle')}
-            onClick={() => void captureAll()}
+            onClick={() => { if (!readOnly()) void captureAll() }}
           >
             {capturing() ? t('multicam.capturing') : t('multicam.captureAll')}
           </Button>
           <Button
             size="sm"
             variant="ghost"
-            disabled={cameras().length === 0}
+            disabled={readOnly() || cameras().length === 0}
             title={t('multicam.toggleAllTitle')}
-            onClick={() => update((current) => withMode(current, nextGlobalMode(current)))}
+            onClick={() => { if (!readOnly()) update((current) => withMode(current, nextGlobalMode(current))) }}
           >
             {nextGlobalMode(cameras()) === 'live' ? t('multicam.liveAll') : t('multicam.snapshotsAll')}
           </Button>
@@ -579,8 +597,9 @@ export default function MultiCamPanel() {
               <CameraTile
                 camera={camera}
                 captureStatus={() => captureResults()[camera.id]}
-                onRemove={(id) => update((current) => current.filter((c) => c.id !== id))}
-                onUpdate={(id, patch) => update((current) => current.map((c) => (c.id === id ? { ...c, ...patch } : c)))}
+                readOnly={readOnly}
+                onRemove={(id) => { if (!readOnly()) update((current) => current.filter((c) => c.id !== id)) }}
+                onUpdate={(id, patch) => { if (!readOnly()) update((current) => current.map((c) => (c.id === id ? { ...c, ...patch } : c))) }}
               />
             )}
           </For>
@@ -593,7 +612,8 @@ export default function MultiCamPanel() {
           type="text"
           placeholder={t('multicam.namePlaceholder')}
           value={name()}
-          onInput={setName}
+          disabled={readOnly()}
+          onInput={(v) => { if (!readOnly()) setName(v) }}
           ariaLabel={t('multicam.namePlaceholder')}
         />
         <TextInput
@@ -602,16 +622,18 @@ export default function MultiCamPanel() {
           type="text"
           placeholder="http://192.168.1.55:8080"
           value={url()}
-          onInput={setUrl}
+          disabled={readOnly()}
+          onInput={(v) => { if (!readOnly()) setUrl(v) }}
           ariaLabel="http://192.168.1.55:8080"
         />
-        <Button type="submit" size="sm" variant="primary">
+        <Button type="submit" size="sm" variant="primary" disabled={readOnly()}>
           {t('multicam.add')}
         </Button>
       </form>
       <Show when={formError()}>
         <div class="nx-banner nx-banner-danger" role="alert">{formError()}</div>
       </Show>
-    </Panel>
+      </Panel>
+    </SettingItem>
   )
 }

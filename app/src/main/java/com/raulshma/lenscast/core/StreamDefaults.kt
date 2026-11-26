@@ -66,6 +66,19 @@ object StreamDefaults {
     // HTTP fan-out guard: one hotspot phone can't serve unlimited browsers.
     const val MAX_HTTP_CLIENTS = 8
 
+    // Web inspector layout: the persisted column, section placements and
+    // custom-preset bounds. The server sanitizer and the web editor both
+    // enforce these caps so a restored or hostile document stays bounded.
+    const val WEB_UI_LAYOUT_SCHEMA_VERSION = 1
+    const val COLUMN_WIDTH_MIN_PX = 260
+    const val COLUMN_WIDTH_DEFAULT_PX = 320
+    const val COLUMN_WIDTH_MAX_PX = 560
+    const val MAX_SECTIONS = 48
+    const val MAX_CUSTOM_PRESETS = 12
+    const val MAX_CUSTOM_ITEMS_PER_SECTION = 24
+    const val MAX_TITLE_LENGTH = 48
+    const val MAX_PRESET_NAME_LENGTH = 40
+
     // Stream stats display: the sliding window (SlidingRateWindow) over
     // (timestamp, bytes, frames) samples every measured display rate reads
     // from — the MJPEG per-client windows, the encoded-output window and the

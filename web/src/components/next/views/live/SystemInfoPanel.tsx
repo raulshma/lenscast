@@ -6,6 +6,7 @@ import { formatBytes } from '../../../../format'
 import { reliabilityAdvisories, restartRefusalDisplay, resetCameraFailureDisplay } from '../../../../lib/reliabilityHints'
 import { t } from '../../../../lib/i18n'
 import { Button, ConfirmDialog, FieldRow, Panel, Skeleton } from '../../ui'
+import { SettingItem, useInspectorSection } from '../../ui/SettingItem'
 
 function formatUptime(ms: number): string {
   if (!Number.isFinite(ms) || ms <= 0) return '—'
@@ -37,6 +38,8 @@ function batteryTempLabel(tenthsC: number | null | undefined): string {
  * recovery).
  */
 export default function SystemInfoPanel() {
+  const inspector = useInspectorSection()
+  const readOnly = () => inspector?.readOnly() === true
   const [info] = createResource<SystemInfo>(() => getSystemInfo())
   // The camera state rides the live status snapshot (GET /api/status's
   // `camera` line): the reset button sits beside it, so the row is both the
@@ -56,6 +59,7 @@ export default function SystemInfoPanel() {
   // pre-check refused BEFORE the device quit — nothing restarted, so the
   // localized failure replaces the restarting note and the dialog closes.
   const onRestart = async (mode: 'soft' | 'process') => {
+    if (readOnly()) return
     setConfirmOpen(false)
     setRestarting(true)
     setRestartFailure('')
@@ -75,6 +79,7 @@ export default function SystemInfoPanel() {
   // server never stops — the answer is typed, so a policy refusal surfaces
   // its reason instead of a silent shrug.
   const onResetCamera = async () => {
+    if (readOnly()) return
     setResetting(true)
     setResetDone(false)
     setResetFailure('')
@@ -129,6 +134,7 @@ export default function SystemInfoPanel() {
 
   return (
     <Panel title={t('system.title')} class="nx-info-panel">
+      <SettingItem id="system.diagnostics">
       <Show
         when={info()}
         fallback={
@@ -164,6 +170,10 @@ export default function SystemInfoPanel() {
             </FieldRow>
           )}
         </For>
+      </Show>
+      </SettingItem>
+      <Show when={info()}>
+        <SettingItem id="system.reset-camera">
         <FieldRow label={t('system.camera')}>
           <span class="nx-info-value">
             {status()?.camera || '—'}
@@ -171,7 +181,7 @@ export default function SystemInfoPanel() {
           <Button
             variant="secondary"
             size="sm"
-            disabled={resetting()}
+            disabled={resetting() || readOnly()}
             loading={resetting()}
             onClick={onResetCamera}
           >
@@ -188,12 +198,19 @@ export default function SystemInfoPanel() {
             <span>{resetFailure()}</span>
           </div>
         </Show>
+        </SettingItem>
+        <SettingItem id="system.restart">
         <FieldRow label={t('system.restart')}>
           <Show
             when={!restarting()}
             fallback={<span class="nx-info-value nx-info-note">{t('system.restarting')}</span>}
           >
-            <Button variant="danger-soft" size="sm" onClick={() => setConfirmOpen(true)}>
+            <Button
+              variant="danger-soft"
+              size="sm"
+              disabled={readOnly()}
+              onClick={() => { if (!readOnly()) setConfirmOpen(true) }}
+            >
               {t('system.restartButton')}
             </Button>
           </Show>
@@ -203,9 +220,10 @@ export default function SystemInfoPanel() {
             <span>{restartFailure()}</span>
           </div>
         </Show>
+        </SettingItem>
       </Show>
       <ConfirmDialog
-        open={confirmOpen()}
+        open={confirmOpen() && !readOnly()}
         title={t('system.restart')}
         message={t('system.restartConfirmOptions')}
         danger

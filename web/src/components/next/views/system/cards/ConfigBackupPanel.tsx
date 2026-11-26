@@ -2,6 +2,7 @@ import { createSignal, Show } from 'solid-js'
 import { exportSettings, importSettings } from '../../../../../api/client'
 import { t } from '../../../../../lib/i18n'
 import { Panel, Button } from '../../../ui'
+import { SettingItem, useInspectorSection } from '../../../ui/SettingItem'
 
 function exportFileName(): string {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
@@ -20,6 +21,8 @@ function exportFileName(): string {
  * failed import can be retried with the same file.
  */
 export default function ConfigBackupPanel() {
+  const inspector = useInspectorSection()
+  const readOnly = () => inspector?.readOnly() === true
   const [busy, setBusy] = createSignal(false)
   const [message, setMessage] = createSignal('')
   const [error, setError] = createSignal('')
@@ -47,7 +50,7 @@ export default function ConfigBackupPanel() {
   }
 
   async function upload(file: File) {
-    if (busy()) return
+    if (readOnly() || busy()) return
     setBusy(true)
     setError('')
     setMessage('')
@@ -66,12 +69,18 @@ export default function ConfigBackupPanel() {
   }
 
   return (
-    <Panel title={t('config.title')} class="nx-panel-danger">
+    <SettingItem id="configBackup.actions">
+      <Panel title={t('config.title')} class="nx-panel-danger">
       <div class="nx-deterrence">
         <Button size="sm" variant="ghost" disabled={busy()} onClick={download}>
           {t('config.export')}
         </Button>
-        <label class="nx-btn nx-btn-danger-soft nx-btn-sm" for="settings-import-input">
+        <label
+          class="nx-btn nx-btn-danger-soft nx-btn-sm"
+          for="settings-import-input"
+          aria-disabled={readOnly()}
+          onClick={(e) => { if (readOnly()) e.preventDefault() }}
+        >
           {busy() ? t('config.working') : t('config.import')}
         </label>
         <input
@@ -79,6 +88,7 @@ export default function ConfigBackupPanel() {
           type="file"
           accept="application/json,.json"
           style={{ display: 'none' }}
+          disabled={readOnly()}
           onChange={(e) => {
             const file = e.currentTarget.files?.[0]
             if (file) void upload(file)
@@ -96,5 +106,6 @@ export default function ConfigBackupPanel() {
         </span>
       </Show>
     </Panel>
+    </SettingItem>
   )
 }

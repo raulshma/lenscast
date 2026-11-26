@@ -37,7 +37,7 @@ function mountPanel(opts: { zones?: MaskingZone[]; maskingEnabled?: boolean; str
   const [settings, setSettings] = createSignal<AllSettings | null>(settingsDoc(opts.maskingEnabled ?? false, opts.zones ?? []))
   // streamOn: null = the status has not loaded yet.
   const [status, setStatus] = createSignal<DeviceStatus | null>(opts.streamOn === null ? null : streamStatus(opts.streamOn !== false))
-  const state = { settings, status } as unknown as NextState
+  const state = { settings, status, isViewer: () => false } as unknown as NextState
   const view = render(() => <MaskingQuickPanel state={state} />)
   const inPanel = () => within(view.container)
   return {

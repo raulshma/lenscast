@@ -16,6 +16,7 @@ import {
 } from '../../../../../lib/timeline'
 import { dayGroupLabel, formatTime, t, tCount } from '../../../../../lib/i18n'
 import { Panel } from '../../../ui'
+import { SettingItem } from '../../../ui/SettingItem'
 
 const HOUR_TICKS = [0, 3, 6, 9, 12, 15, 18, 21, 24]
 
@@ -156,8 +157,9 @@ export default function RecordingTimelinePanel() {
   }
 
   return (
-    <Panel title={t('timeline.title')}>
-      <div class="field-group">
+    <SettingItem id="timeline.recordings">
+      <Panel title={t('timeline.title')}>
+        <div class="field-group">
         <div class="field-row">
           <div class="timeline-day-picker" role="group" aria-label={t('timeline.dayAria')}>
           <button
@@ -273,6 +275,7 @@ export default function RecordingTimelinePanel() {
           </Show>
         </Show>
       </Show>
-    </Panel>
+      </Panel>
+    </SettingItem>
   )
 }

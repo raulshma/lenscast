@@ -1,4 +1,4 @@
-import type { AllSettings, AuthConfig, CameraSettings, DetectionEventType, DeviceStatus, LensesResponse, RtspClient, SessionRole, StreamingSettings } from '../types'
+import type { AllSettings, AuthConfig, CameraSettings, DetectionEventType, DeviceStatus, LensesResponse, RtspClient, SessionRole, StreamingSettings, WebUiLayoutDto } from '../types'
 
 type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean | null
 
@@ -138,6 +138,29 @@ export async function updateSettings(settings: SettingsPatch): Promise<{ success
     body: JSON.stringify(settings),
   })
   assertWriteSucceeded(body, 'Settings update failed')
+  return body
+}
+
+/** GET /api/ui/layout — the persisted inspector layout and custom presets. */
+export async function getUiLayout(): Promise<WebUiLayoutDto> {
+  return requestJson('/api/ui/layout')
+}
+
+/** PUT /api/ui/layout — returns the device's sanitized layout document. */
+export async function saveUiLayout(layout: WebUiLayoutDto): Promise<WebUiLayoutDto> {
+  const body = await requestJson<WebUiLayoutDto>('/api/ui/layout', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(layout),
+  })
+  assertWriteSucceeded(body, 'UI layout save failed')
+  return body
+}
+
+/** DELETE /api/ui/layout — restores and returns the default layout document. */
+export async function resetUiLayout(): Promise<WebUiLayoutDto> {
+  const body = await requestJson<WebUiLayoutDto>('/api/ui/layout', { method: 'DELETE' })
+  assertWriteSucceeded(body, 'UI layout reset failed')
   return body
 }
 

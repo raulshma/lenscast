@@ -41,9 +41,11 @@ import com.raulshma.lenscast.core.StreamAuthCrypto
 import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.core.parseEnum
 import com.raulshma.lenscast.core.push.VapidSubjectPolicy
+import com.raulshma.lenscast.streaming.model.WebUiLayoutDto
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
 import com.raulshma.lenscast.streaming.rtsp.RtspResolution
 import com.raulshma.lenscast.streaming.rtsp.RtspVideoCodec
+import com.raulshma.lenscast.streaming.web.WebUiLayoutPolicy
 import com.squareup.moshi.JsonClass
 import com.squareup.moshi.Types
 import kotlinx.coroutines.CoroutineScope
@@ -117,6 +119,7 @@ private object Keys {
     val STREAM_AUDIO_ECHO_CANCELLATION = stringPreferencesKey("stream_audio_echo_cancellation")
     val RECORDING_AUDIO_ENABLED = stringPreferencesKey("recording_audio_enabled")
     val WEB_STREAMING_ENABLED = stringPreferencesKey("web_streaming_enabled")
+    val WEB_UI_LAYOUT_JSON = stringPreferencesKey("web_ui_layout_json")
     val AUTH_ENABLED = stringPreferencesKey("auth_enabled")
     val AUTH_USERNAME = stringPreferencesKey("auth_username")
     val AUTH_PASSWORD_HASH = stringPreferencesKey("auth_password_hash")
@@ -389,6 +392,19 @@ internal val streamAudioEchoCancellationPref =
 internal val recordingAudioEnabledPref = boolPref(Keys.RECORDING_AUDIO_ENABLED, defaultTrue = true)
 
 internal val webStreamingEnabledPref = boolPref(Keys.WEB_STREAMING_ENABLED, defaultTrue = true)
+
+/**
+ * The whole inspector-layout document behind one JSON preference. Decode is
+ * total (null/corrupt JSON folds to the default) and both directions run
+ * through the pure policy, so every writer persists the same bounded shape.
+ */
+internal val webUiLayoutPref = SettingPref(
+    default = WebUiLayoutPolicy.defaultLayout(),
+    decode = { prefs -> parseWebUiLayout(prefs[Keys.WEB_UI_LAYOUT_JSON]) },
+    encode = { prefs, layout ->
+        prefs[Keys.WEB_UI_LAYOUT_JSON] = serializeWebUiLayout(layout)
+    },
+)
 
 internal val authSettingsPref = SettingPref(
     default = StreamAuthSettings(),
@@ -980,6 +996,32 @@ internal val updateLastCheckTimePref = longPref(Keys.UPDATE_LAST_CHECK_TIME, def
 
 internal val updateDismissedVersionPref = stringPref(Keys.UPDATE_DISMISSED_VERSION, default = "")
 
+private val webUiLayoutAdapter by lazy {
+    AppJson.moshi.adapter(WebUiLayoutDto::class.java)
+}
+
+/**
+ * The UI-layout persistence codec. Missing or malformed JSON is a total decode
+ * to [WebUiLayoutPolicy.defaultLayout]; a decoded document is sanitized before
+ * any caller sees it. Internal so JVM tests can pin corrupt-input handling
+ * without a Context or DataStore.
+ */
+internal fun parseWebUiLayout(jsonString: String?): WebUiLayoutDto {
+    val fallback = WebUiLayoutPolicy.defaultLayout()
+    if (jsonString.isNullOrEmpty()) return fallback
+    return runCatching {
+        val layout = webUiLayoutAdapter.fromJson(jsonString) ?: return fallback
+        WebUiLayoutPolicy.sanitize(layout)
+    }.getOrDefault(fallback)
+}
+
+/** Encode only a sanitized layout; an adapter failure persists the default document. */
+internal fun serializeWebUiLayout(layout: WebUiLayoutDto): String = runCatching {
+    webUiLayoutAdapter.toJson(WebUiLayoutPolicy.sanitize(layout))
+}.getOrElse {
+    webUiLayoutAdapter.toJson(WebUiLayoutPolicy.defaultLayout())
+}
+
 /** The composite camera-settings decode: every key keeps its exact read convention. */
 private fun decodeCameraSettings(prefs: Preferences): CameraSettings = CameraSettings(
     exposureCompensation = prefs[Keys.EXPOSURE_COMPENSATION] ?: 0,
@@ -1482,6 +1524,11 @@ class SettingsDataStore(
 
     val webStreamingEnabled: StateFlow<Boolean> = webStreamingEnabledPref.shared()
 
+    val webUiLayout: StateFlow<WebUiLayoutDto> = webUiLayoutPref.shared()
+
+    /** The layout's disk truth, never the shared flow's default-first placeholder. */
+    suspend fun webUiLayoutFromDisk(): WebUiLayoutDto = disk(webUiLayoutPref)
+
     val authSettings: StateFlow<StreamAuthSettings> = authSettingsPref.shared()
 
     val rtspEnabled: StateFlow<Boolean> = rtspEnabledPref.shared()
@@ -1761,6 +1808,8 @@ class SettingsDataStore(
     suspend fun saveRecordingAudioEnabled(enabled: Boolean) = recordingAudioEnabledPref.save(enabled)
 
     suspend fun saveWebStreamingEnabled(enabled: Boolean) = webStreamingEnabledPref.save(enabled)
+
+    suspend fun saveWebUiLayout(layout: WebUiLayoutDto) = webUiLayoutPref.save(layout)
 
     /**
      * The atomic auth-record write: the transform runs on the value decoded

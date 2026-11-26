@@ -13,6 +13,7 @@ import com.raulshma.lenscast.automation.schedule.MissedRunPolicy
 import com.raulshma.lenscast.capture.model.DetectionEventDeepLink
 import com.raulshma.lenscast.streaming.web.AutomationWebHandler
 import com.raulshma.lenscast.streaming.web.AuthWebHandler
+import com.raulshma.lenscast.streaming.web.WebUiLayoutPolicy
 import com.squareup.moshi.Types
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -56,6 +57,15 @@ class DtoContractFixtureTest {
         assertEquals("Serialized DTO does not match contract fixture $fixtureName", expected, actual)
     }
 
+    /** Moshi omits null object members; remove fixture-only nulls before a wire comparison. */
+    private fun withoutNullObjectMembers(value: Any?): Any? = when (value) {
+        is Map<*, *> -> value.entries.mapNotNull { (key, entry) ->
+            if (entry == null) null else key to withoutNullObjectMembers(entry)
+        }.toMap()
+        is List<*> -> value.map(::withoutNullObjectMembers)
+        else -> value
+    }
+
     @Test
     fun `settings response matches the settings fixture`() {
         val settings = SettingsResponseDto(
@@ -73,6 +83,35 @@ class DtoContractFixtureTest {
         assertMatchesFixture(
             "settings.json",
             moshi.adapter(SettingsResponseDto::class.java).toJson(settings),
+        )
+    }
+
+    @Test
+    fun `ui layout fixture round trips through the real DTO and pins the default response`() {
+        val adapter = moshi.adapter(WebUiLayoutDto::class.java)
+        val fixtureJson = fixtureFile("ui-layout.json").readText()
+        val fixtureLayout = requireNotNull(adapter.fromJson(fixtureJson)) {
+            "ui-layout.json did not decode through the AppJson DTO adapter"
+        }
+        @Suppress("UNCHECKED_CAST")
+        val expectedFixture = withoutNullObjectMembers(mapAdapter.fromJson(fixtureJson)) as Map<String, Any?>
+        assertEquals(
+            "Serialized DTO does not match contract fixture ui-layout.json",
+            expectedFixture,
+            mapAdapter.fromJson(adapter.toJson(fixtureLayout)),
+        )
+
+        // A fresh device returns the same schema, default column and five
+        // built-in placements, with a zero timestamp and no custom presets.
+        val defaultLayout = WebUiLayoutPolicy.defaultLayout()
+        assertEquals(WebUiLayoutDto(), defaultLayout)
+        val expectedDefault = expectedFixture.toMutableMap()
+        expectedDefault["updatedAtMs"] = 0.0
+        expectedDefault["presets"] = emptyList<Any>()
+        assertEquals(
+            "Serialized default UI layout does not match the fixture's default-shaped fields",
+            expectedDefault,
+            mapAdapter.fromJson(adapter.toJson(defaultLayout)),
         )
     }
 

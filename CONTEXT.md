@@ -785,6 +785,39 @@ when `types.ts` or the client's `API_DEFAULTS` drifts from the same fixtures
 — and `buildWebUi` runs `tsc --noEmit` + vitest before vite, so type errors
 and contract drift stop shipping inside the APK.
 
+### Web UI Layout Policy
+**`streaming/web/WebUiLayoutPolicy.kt`** — the pure sanitizer and default
+provider for the Beta console's persisted inspector document
+(`WebUiLayoutDto`: schema version, server timestamp, active preset, column
+width/collapse, ordered built-in/custom sections, and custom presets). It
+clamps the column to 260–560px, caps sections/presets/items/titles, trims and
+deduplicates identities, preserves explicit empty arrays, and retains
+unknown nonblank built-in section ids for forward compatibility. Kotlin and
+`web/src/lib/inspectorLayout.ts` implement the same bounds and immutable
+transitions; contract fixtures and tests pin the two sides to one wire shape.
+
+### Web UI Layout Handler
+**`streaming/web/WebUiLayoutWebHandler.kt`** — GET/PUT/DELETE
+`/api/ui/layout`, persisted as one composite `SettingsDataStore` preference.
+GET reads `webUiLayoutFromDisk()` so a replayed default-first shared-flow
+placeholder can never answer as device truth. PUT owns `updatedAtMs` and
+sanitizes before saving; DELETE saves the exact default document. Viewers
+may GET the operator layout, while PUT/DELETE require admin and remain
+unavailable to API tokens. The configurator's JSON export/import uses this
+resource; `/api/settings/export` remains the camera-settings backup contract.
+
+### Inspector Layout Store
+**`web/src/hooks/useInspectorLayout.ts`** — the one controller instantiated
+by `NextShell` and passed into `LiveView`. `localStorage` is only an
+instant-paint cache and legacy/offline fallback; device GET hydration is
+canonical, an HTTP 404 latches browser-only mode, and other failures remain
+retryable. Optimistic edits carry a revision and session epoch: stale GETs
+are discarded, PUTs serialize with one trailing save, and DELETE reset waits
+behind any in-flight PUT without overwriting edits made while it runs.
+Saves debounce for 350ms; refresh runs every 30s and on visibility resume
+only when clean. Viewer mutation, import and reset are no-ops in the client
+as well as denied by the server.
+
 ### Web Client Core
 **`web/src/hooks/useAppState.ts`** — the one state hook over the Web API,
 composition only: signals, settings/save handlers, and the action pipeline
@@ -3239,6 +3272,7 @@ contracts.
 | Zoom send throttle | `useCameraControls.setZoom` over the pure verdicts | `web/src/lib/cameraControlsPolicy.ts` | leading send + one trailing flush per `ZOOM_SEND_THROTTLE_MS = 150` | a slider drag lands as a handful of POSTs instead of one per input event (the old bar fired one per input); the flush carries the newest optimistic ratio and re-arms `lastZoomSentAt`; cleanup cancels a pending flush so an unmounted strip never POSTs |
 | Strip collapse | `useCameraControls` `collapsed` signal over `parseStripCollapsed` (pure) | `web/src/lib/cameraControlsPolicy.ts` | open / collapsed | persisted under `lenscast.camStrip`; anything but `'collapsed'` is open — an unknown value can never wedge the strip shut (uiMode's parse rule); the collapsed handle is also the HLS rung's escape hatch, since the expanded strip overlaps that rung's native seek bar |
 | Camera staged patch (touched-key save) | `useAppState` `pendingCamera` over `createPendingPatch` (pure) | `web/src/lib/touchedPatch.ts` | empty / accumulating / taken (a take may be in flight while the next accumulates) | touched key → the value set at touch time, across the 400 ms camera debounce; the flush takes it first (an abandoned flush drains it), PUTs exactly it, and on success `settle`s its keys back over the mirror unless a newer edit claimed one; `signOut` and reset-defaults clear it — a whole-mirror PUT let a stale iso overwrite an automation rule's just-written value, and a keys-only PUT re-read from the mirror re-sent the pre-edit value when a settings GET landed in the window (issue #25, see Touched-Key Camera Save) |
+| Inspector layout synchronization | `useInspectorLayout` (revision + epoch + dirty/reset queue) | `web/src/hooks/useInspectorLayout.ts` | cache-painted / hydrating / clean / dirty-saving / local-only | canonical device document, browser cache only for instant paint and fallback; 350ms serialized PUTs plus trailing save, DELETE reset serialized after PUT, 30s/visibility refresh only while clean; viewers read but never mutate (see Inspector Layout Store) |
 
 ### Deliberately implicit
 

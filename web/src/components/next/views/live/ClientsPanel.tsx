@@ -2,6 +2,7 @@ import { createSignal, For, onCleanup, onMount, Show } from 'solid-js'
 import { kickStreamClient, listStreamClients } from '../../../../api/client'
 import { t, tCount } from '../../../../lib/i18n'
 import { Panel, Badge, Empty, Button } from '../../ui'
+import { SettingItem, useInspectorSection } from '../../ui/SettingItem'
 
 interface ClientSummary {
   httpClients: string[]
@@ -17,6 +18,8 @@ interface ClientSummary {
  * the list but the kick buttons are disabled — the list itself is a read.
  */
 export default function ClientsPanel(props: { readOnly?: () => boolean } = {}) {
+  const inspector = useInspectorSection()
+  const readOnly = () => props.readOnly?.() === true || inspector?.readOnly() === true
   const [clients, setClients] = createSignal<ClientSummary | null>(null)
   const [error, setError] = createSignal('')
   const [kicking, setKicking] = createSignal('')
@@ -33,7 +36,7 @@ export default function ClientsPanel(props: { readOnly?: () => boolean } = {}) {
   }
 
   async function handleKick(id: string) {
-    if (kicking()) return
+    if (readOnly() || kicking()) return
     setKicking(id)
     try {
       await kickStreamClient(id)
@@ -54,64 +57,66 @@ export default function ClientsPanel(props: { readOnly?: () => boolean } = {}) {
   })
 
   return (
-    <Panel
-      title={t('clients.title')}
-      badge={
-        <Show when={clients()}>
-          <Badge tone={clients()!.httpCount > 0 ? 'accent' : 'neutral'} mono>
-            {clients()!.httpCount}
-          </Badge>
+    <SettingItem id="clients.list">
+      <Panel
+        title={t('clients.title')}
+        badge={
+          <Show when={clients()}>
+            <Badge tone={clients()!.httpCount > 0 ? 'accent' : 'neutral'} mono>
+              {clients()!.httpCount}
+            </Badge>
+          </Show>
+        }
+      >
+        <Show when={error()}>
+          <div class="nx-banner nx-banner-danger" role="alert">{error()}</div>
         </Show>
-      }
-    >
-      <Show when={error()}>
-        <div class="nx-banner nx-banner-danger" role="alert">{error()}</div>
-      </Show>
 
-      <Show when={clients()} fallback={<Empty title={t('clients.waiting')} />}>
-        <div class="nx-channel-head">
-          <Badge tone="neutral" mono>HTTP {clients()!.httpCount}</Badge>
-          <Badge tone="neutral" mono>RTSP {clients()!.rtspCount}</Badge>
-        </div>
-        <ul class="nx-clients">
-          <For each={clients()!.httpClients} fallback={
-            <li class="nx-clients-empty">
-              {t('clients.noHttp')}.
-              <Show when={clients()!.rtspCount > 0}>
-                {' '}{tCount('clients.rtspCount', clients()!.rtspCount)}.
-              </Show>
-            </li>
-          }>
-            {(id) => (
-              <li class="nx-clients-row">
-                <span class="nx-clients-id nx-mono" title={id}>{id}</span>
-                <Show when={kicked() === id} fallback={
-                  <Button
-                    size="sm"
-                    variant="danger-soft"
-                    disabled={kicking() !== '' || props.readOnly?.() === true}
-                    title={props.readOnly?.() === true ? t('clients.readOnlyTitle') : undefined}
-                    onClick={() => void handleKick(id)}
-                    ariaLabel={t('clients.kick')}
-                  >
-                    {kicking() === id ? t('clients.kicking') : t('clients.kick')}
-                  </Button>
-                }>
-                  <span class="nx-clients-kicked">{t('clients.kicked')}</span>
+        <Show when={clients()} fallback={<Empty title={t('clients.waiting')} />}>
+          <div class="nx-channel-head">
+            <Badge tone="neutral" mono>HTTP {clients()!.httpCount}</Badge>
+            <Badge tone="neutral" mono>RTSP {clients()!.rtspCount}</Badge>
+          </div>
+          <ul class="nx-clients">
+            <For each={clients()!.httpClients} fallback={
+              <li class="nx-clients-empty">
+                {t('clients.noHttp')}.
+                <Show when={clients()!.rtspCount > 0}>
+                  {' '}{tCount('clients.rtspCount', clients()!.rtspCount)}.
                 </Show>
               </li>
-            )}
-          </For>
-        </ul>
-        {/* The slot line is a fact, not chrome: with no answer from the
-            rig (fields missing on the wire) the line withholds itself
-            rather than printing undefined for a measurement. */}
-        <Show when={Number.isFinite(clients()!.httpCount) && Number.isFinite(clients()!.maxHttp)}>
-          <div class="nx-field-hint">
-            {t('clients.slotsInUse', { used: clients()!.httpCount, max: clients()!.maxHttp })}
-          </div>
+            }>
+              {(id) => (
+                <li class="nx-clients-row">
+                  <span class="nx-clients-id nx-mono" title={id}>{id}</span>
+                  <Show when={kicked() === id} fallback={
+                    <Button
+                      size="sm"
+                      variant="danger-soft"
+                      disabled={kicking() !== '' || readOnly()}
+                      title={readOnly() ? t('clients.readOnlyTitle') : undefined}
+                      onClick={() => void handleKick(id)}
+                      ariaLabel={t('clients.kick')}
+                    >
+                      {kicking() === id ? t('clients.kicking') : t('clients.kick')}
+                    </Button>
+                  }>
+                    <span class="nx-clients-kicked">{t('clients.kicked')}</span>
+                  </Show>
+                </li>
+              )}
+            </For>
+          </ul>
+          {/* The slot line is a fact, not chrome: with no answer from the
+              rig (fields missing on the wire) the line withholds itself
+              rather than printing undefined for a measurement. */}
+          <Show when={Number.isFinite(clients()!.httpCount) && Number.isFinite(clients()!.maxHttp)}>
+            <div class="nx-field-hint">
+              {t('clients.slotsInUse', { used: clients()!.httpCount, max: clients()!.maxHttp })}
+            </div>
+          </Show>
         </Show>
-      </Show>
-    </Panel>
+      </Panel>
+    </SettingItem>
   )
 }

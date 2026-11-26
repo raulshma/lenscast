@@ -38,6 +38,10 @@ import com.raulshma.lenscast.streaming.SessionRole
  * `/api/auth/session` and `/api/auth/status` need no exception: they are
  * GETs outside the admin-only set, and the transport answers them before
  * this policy is consulted anyway (they are self checks, allowed for viewers).
+ *
+ * `/api/ui/layout` follows the ordinary read/write split: GET is an authed
+ * viewer read, while PUT and DELETE fall through to DENY (the filter answers
+ * 403). Layout persistence is an administrator configuration change.
  */
 object RoleGatePolicy {
 

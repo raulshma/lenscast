@@ -3,6 +3,7 @@ import type { AllSettings, CameraSettings } from '../../../../../types'
 import { API_DEFAULTS } from '../../../../../api/defaults'
 import { t } from '../../../../../lib/i18n'
 import { Panel, SliderField, FieldRow, Select } from '../../../ui'
+import { SettingItem, useInspectorSection } from '../../../ui/SettingItem'
 
 interface Props {
   settings: () => AllSettings | null
@@ -10,12 +11,19 @@ interface Props {
 }
 
 export default function ExposurePanel(props: Props) {
+  const inspector = useInspectorSection()
+  const readOnly = () => inspector?.readOnly() === true
+  const update = (patch: Partial<CameraSettings>) => {
+    if (!readOnly()) props.updateCamera(patch)
+  }
   const s = () => props.settings()
 
   return (
     <Panel title={t('exposure.title')}>
       {/* Exposure Compensation */}
+      <SettingItem id="exposure.compensation">
       <SliderField
+        disabled={readOnly()}
         label={t('exposure.compensation')}
         min={-12}
         max={12}
@@ -23,11 +31,14 @@ export default function ExposurePanel(props: Props) {
         value={s()?.camera?.exposureCompensation ?? API_DEFAULTS.cameraExposureCompensation}
         onChange={(v) => props.updateCamera({ exposureCompensation: v })}
       />
+      </SettingItem>
 
+      <SettingItem id="exposure.iso">
       {/* ISO */}
       <FieldRow label={t('exposure.iso')}>
         <div style={{ display: 'flex', gap: '6px', 'align-items': 'center' }}>
           <Select
+            disabled={readOnly()}
             small
             value={s()?.camera?.iso == null ? 'auto' : 'manual'}
             options={[
@@ -36,9 +47,9 @@ export default function ExposurePanel(props: Props) {
             ]}
             onChange={(v) => {
               if (v === 'auto') {
-                props.updateCamera({ iso: null })
+                update({ iso: null })
               } else {
-                props.updateCamera({ iso: s()?.camera?.iso ?? API_DEFAULTS.cameraIso })
+                update({ iso: s()?.camera?.iso ?? API_DEFAULTS.cameraIso })
               }
             }}
             ariaLabel={t('exposure.iso')}
@@ -51,17 +62,22 @@ export default function ExposurePanel(props: Props) {
               value={s()?.camera?.iso ?? ''}
               min={100}
               max={32000}
-              onChange={(e) => props.updateCamera({ iso: parseInt(e.currentTarget.value) || null })}
+              disabled={readOnly()}
+              onChange={(e) => update({ iso: parseInt(e.currentTarget.value) || null })}
               aria-label={t('exposure.iso')}
             />
           )}
         </div>
       </FieldRow>
+      </SettingItem>
 
+      <SettingItem id="exposure.time">
+      <>
       {/* Exposure Time */}
       <FieldRow label={t('exposure.time')}>
         <div style={{ display: 'flex', gap: '6px', 'align-items': 'center' }}>
           <Select
+            disabled={readOnly()}
             small
             value={s()?.camera?.exposureTime == null ? 'auto' : 'manual'}
             options={[
@@ -70,9 +86,9 @@ export default function ExposurePanel(props: Props) {
             ]}
             onChange={(v) => {
               if (v === 'auto') {
-                props.updateCamera({ exposureTime: null })
+                update({ exposureTime: null })
               } else {
-                props.updateCamera({ exposureTime: s()?.camera?.exposureTime ?? API_DEFAULTS.cameraExposureTime })
+                update({ exposureTime: s()?.camera?.exposureTime ?? API_DEFAULTS.cameraExposureTime })
               }
             }}
             ariaLabel={t('exposure.time')}
@@ -91,10 +107,11 @@ export default function ExposurePanel(props: Props) {
               max={500}
               step={0.1}
               placeholder="ms"
+              disabled={readOnly()}
               onChange={(e) => {
                 const ms = Number.parseFloat(e.currentTarget.value)
                 if (Number.isFinite(ms) && ms > 0) {
-                  props.updateCamera({ exposureTime: Math.round(ms * 1_000_000) })
+                  update({ exposureTime: Math.round(ms * 1_000_000) })
                 } else {
                   e.currentTarget.value = String(
                     Number(((s()?.camera?.exposureTime ?? API_DEFAULTS.cameraExposureTime) / 1_000_000).toFixed(3)),
@@ -114,6 +131,8 @@ export default function ExposurePanel(props: Props) {
           })}
         </div>
       </Show>
+      </>
+      </SettingItem>
     </Panel>
   )
 }

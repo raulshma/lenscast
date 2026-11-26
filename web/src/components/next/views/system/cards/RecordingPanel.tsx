@@ -3,6 +3,7 @@ import type { RecordingConfig, RecordingQuality } from '../../../../../types'
 import { RECORDING_QUALITY_LABELS } from '../../../../../types'
 import { formatTime, t } from '../../../../../lib/i18n'
 import { Panel, ToggleField, SliderField, FieldRow, Field, Select, TextInput, Button, Badge, Led, type SelectOption } from '../../../ui'
+import { SettingItem, useInspectorSection } from '../../../ui/SettingItem'
 
 /** Wire value → i18n key for the recording-quality options. */
 const QUALITY_KEYS: Record<RecordingQuality, string> = {
@@ -30,6 +31,11 @@ interface Props {
  * tomorrow when it already passed today) into startTimeMs at start.
  */
 export default function RecordingPanel(props: Props) {
+  const inspector = useInspectorSection()
+  const readOnly = () => inspector?.readOnly() === true
+  const setConfig = (value: RecordingConfig) => {
+    if (!readOnly()) props.setRecordingConfig(value)
+  }
   const cfg = () => props.recordingConfig()
   const [scheduleTimeStr, setScheduleTimeStr] = createSignal('')
 
@@ -37,6 +43,7 @@ export default function RecordingPanel(props: Props) {
     Object.keys(RECORDING_QUALITY_LABELS).map((k) => ({ value: k, label: t(QUALITY_KEYS[k as RecordingQuality]) }))
 
   const handleStartAction = () => {
+    if (readOnly()) return
     const timeStr = scheduleTimeStr()
     if (timeStr) {
       const now = new Date()
@@ -46,9 +53,9 @@ export default function RecordingPanel(props: Props) {
       if (scheduledTime.getTime() <= now.getTime()) {
         scheduledTime.setDate(scheduledTime.getDate() + 1)
       }
-      props.setRecordingConfig({ ...cfg(), startTimeMs: scheduledTime.getTime() })
+      setConfig({ ...cfg(), startTimeMs: scheduledTime.getTime() })
     } else {
-      props.setRecordingConfig({ ...cfg(), startTimeMs: null })
+      setConfig({ ...cfg(), startTimeMs: null })
     }
     props.handleStartRecording()
   }
@@ -71,6 +78,8 @@ export default function RecordingPanel(props: Props) {
         </Show>
       }
     >
+      <SettingItem id="recording.status">
+      <>
       <Show when={props.isRecording()}>
         <div class="nx-banner nx-banner-rec" role="status" aria-live="polite">
           <Led tone="rec" />
@@ -87,26 +96,32 @@ export default function RecordingPanel(props: Props) {
           })}
         </div>
       </Show>
+      </>
+      </SettingItem>
 
-      {/* Include Audio */}
+      <SettingItem id="recording.audio">
       <ToggleField
         label={t('recording.audio')}
         checked={cfg().includeAudio}
-        disabled={props.isRecording()}
-        onChange={() => props.setRecordingConfig({ ...cfg(), includeAudio: !cfg().includeAudio })}
+        disabled={props.isRecording() || readOnly()}
+        onChange={() => setConfig({ ...cfg(), includeAudio: !cfg().includeAudio })}
       />
+      </SettingItem>
 
-      {/* Quality */}
+      <SettingItem id="recording.quality">
       <FieldRow label={t('recording.quality')}>
         <Select
           value={cfg().quality}
           options={qualityOptions()}
-          disabled={props.isRecording()}
-          onChange={(v) => props.setRecordingConfig({ ...cfg(), quality: v as RecordingQuality })}
+          disabled={props.isRecording() || readOnly()}
+          onChange={(v) => setConfig({ ...cfg(), quality: v as RecordingQuality })}
           ariaLabel={t('recording.quality')}
         />
       </FieldRow>
+      </SettingItem>
 
+      <SettingItem id="recording.duration">
+      <>
       {/* Duration */}
       <SliderField
         label={t('recording.duration')}
@@ -114,8 +129,8 @@ export default function RecordingPanel(props: Props) {
         min={0}
         max={3600}
         value={cfg().durationSeconds}
-        disabled={props.isRecording()}
-        onChange={(v) => props.setRecordingConfig({ ...cfg(), durationSeconds: v })}
+        disabled={props.isRecording() || readOnly()}
+        onChange={(v) => setConfig({ ...cfg(), durationSeconds: v })}
       />
 
       {/* Repeat Interval */}
@@ -125,8 +140,8 @@ export default function RecordingPanel(props: Props) {
         min={0}
         max={3600}
         value={cfg().repeatIntervalSeconds}
-        disabled={props.isRecording() || props.isScheduled()}
-        onChange={(v) => props.setRecordingConfig({ ...cfg(), repeatIntervalSeconds: v })}
+        disabled={props.isRecording() || props.isScheduled() || readOnly()}
+        onChange={(v) => setConfig({ ...cfg(), repeatIntervalSeconds: v })}
       />
 
       {/* Schedule Time */}
@@ -134,12 +149,15 @@ export default function RecordingPanel(props: Props) {
         <TextInput
           type="time"
           value={scheduleTimeStr()}
-          disabled={props.isRecording() || props.isScheduled()}
+          disabled={props.isRecording() || props.isScheduled() || readOnly()}
           onInput={setScheduleTimeStr}
           ariaLabel={t('recording.scheduleTime')}
         />
       </Field>
+      </>
+      </SettingItem>
 
+      <SettingItem id="recording.start-stop">
       {/* Start/Stop — the start verb rides a quiet outline key: the
           Scheduled rack pairs it with interval capture, and a rack with
           two competing verbs has no one primary (the labels say it). */}
@@ -147,7 +165,8 @@ export default function RecordingPanel(props: Props) {
         <Button
           variant="danger"
           size="sm"
-          onClick={props.handleStopRecording}
+          disabled={readOnly()}
+          onClick={() => { if (!readOnly()) props.handleStopRecording() }}
           ariaLabel={props.isRecording() ? t('recording.stop') : t('recording.stopScheduled')}
         >
           {props.isRecording() ? t('recording.stop') : t('recording.stopScheduled')}
@@ -156,12 +175,14 @@ export default function RecordingPanel(props: Props) {
         <Button
           variant="secondary"
           size="sm"
+          disabled={readOnly()}
           onClick={handleStartAction}
           ariaLabel={scheduleTimeStr() ? t('recording.schedule') : t('recording.start')}
         >
           {scheduleTimeStr() ? t('recording.schedule') : t('recording.start')}
         </Button>
       )}
+      </SettingItem>
     </Panel>
   )
 }

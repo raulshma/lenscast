@@ -112,6 +112,18 @@ class OpenApiSpecParityTest {
     }
 
     @Test
+    fun `ui layout writes are session-only while its read remains token-readable`() {
+        @Suppress("UNCHECKED_CAST")
+        val operations = OpenApiSpec.paths().getValue("/api/ui/layout") as Map<String, Map<String, Any?>>
+        val sessionOnly = listOf(mapOf("sessionCookie" to emptyList<String>()))
+        assertEquals(sessionOnly, operations.getValue("put")["security"])
+        assertEquals(sessionOnly, operations.getValue("delete")["security"])
+        @Suppress("UNCHECKED_CAST")
+        val readSecurity = operations.getValue("get")["security"] as List<Map<String, List<String>>>
+        assertTrue("GET /api/ui/layout must stay readable to API tokens", readSecurity.any { "bearerToken" in it })
+    }
+
+    @Test
     fun `the spec serializes and carries the OpenAPI 3_1 marker`() {
         val json = OpenApiSpec.json()
         assertTrue(json.contains("\"openapi\":\"3.1.0\""))
@@ -137,13 +149,13 @@ class OpenApiSpecParityTest {
             @Suppress("UNCHECKED_CAST")
             val properties = (schema["properties"] as? Map<String, Map<String, Any?>>) ?: emptyMap()
             val nullable = properties.filterValues { it["nullable"] == true }.keys
-            val documented = properties.keys - nullable
-            val missingInSpec = fixture.keys.filterNot { it in documented }
+            val nonNullable = properties.keys - nullable
+            val missingInSpec = fixture.keys.filterNot { it in properties.keys }
             assertTrue(
                 "$name (x-fixture $fixtureName): fixture keys missing from the schema: $missingInSpec",
                 missingInSpec.isEmpty(),
             )
-            val absentFromFixture = documented.filterNot { it in fixture.keys }
+            val absentFromFixture = nonNullable.filterNot { it in fixture.keys }
             assertTrue(
                 "$name (x-fixture $fixtureName): schema properties the fixture never carries: $absentFromFixture — " +
                     "the property set must equal the fixture's key set (mark wire-omitted nulls `nullable` to allow their absence)",
@@ -172,6 +184,7 @@ class OpenApiSpecParityTest {
     private fun stubbedRouter(): ApiRouter = ApiRouter(
         settings = mockk(relaxed = true),
         automation = mockk(relaxed = true),
+        uiLayout = mockk(relaxed = true),
         status = mockk(relaxed = true),
         stream = mockk(relaxed = true),
         capture = mockk(relaxed = true),
@@ -210,8 +223,11 @@ class OpenApiSpecParityTest {
         val pointer = parts.getOrNull(1)
         if (pointer != null) {
             for (segment in pointer.split('/')) {
-                node = (node as? Map<*, *>)?.get(segment)
-                    ?: error("x-fixture $fixtureName has no '$segment' section in ${file.name}")
+                node = when (node) {
+                    is Map<*, *> -> node[segment]
+                    is List<*> -> node.getOrNull(segment.toIntOrNull() ?: -1)
+                    else -> null
+                } ?: error("x-fixture $fixtureName has no '$segment' section in ${file.name}")
             }
         }
         @Suppress("UNCHECKED_CAST")

@@ -28,6 +28,10 @@ function isStreamStatsKey(key: string): boolean {
   return STREAM_STATS_PREFIXES.some((prefix) => key.startsWith(prefix))
 }
 
+function isInspectorKey(key: string): boolean {
+  return key === 'next.inspector' || key.startsWith('next.inspector.')
+}
+
 function placeholders(value: string): string {
   return [...value.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort().join(',')
 }
@@ -87,6 +91,20 @@ describe('catalog integrity', () => {
       if (!/_(one|few|many|other)$/.test(key)) continue
       const other = key.replace(/_(one|few|many|other)$/, '_other')
       expect(value).toBe(zh[other])
+    }
+  })
+
+  it('inspector keys exist in every locale with en-identical placeholders', () => {
+    const inspectorKeys = Object.keys(en).filter(isInspectorKey)
+    expect(inspectorKeys.length, 'the inspector namespace matched nothing').toBeGreaterThanOrEqual(60)
+    for (const [name, catalog] of Object.entries(CATALOGS)) {
+      for (const key of inspectorKeys) {
+        expect(key in catalog, `${name} is missing inspector key '${key}'`).toBe(true)
+        expect(
+          placeholders(catalog[key] ?? ''),
+          `${name}['${key}'] placeholders differ from en`,
+        ).toBe(placeholders(en[key]))
+      }
     }
   })
 

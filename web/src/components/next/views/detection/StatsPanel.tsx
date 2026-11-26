@@ -5,6 +5,7 @@ import { STATS_WINDOWS, sevenDaySeries, windowCounts, windowTotal, type StatsWin
 import { todayKey } from '../../../../lib/timeline'
 import { formatDate, t, tCount } from '../../../../lib/i18n'
 import { Panel, Segmented, Skeleton, FieldRow, Empty } from '../../ui'
+import { SettingItem } from '../../ui/SettingItem'
 
 function weekdayLabel(day: string): string {
   const [y, m, d] = day.split('-').map(Number)
@@ -49,7 +50,8 @@ export default function StatsPanel() {
     }))
 
   return (
-    <Panel
+    <SettingItem id="detection.stats">
+      <Panel
       title={t('stats.title')}
       actions={
         <Show when={stats()}>
@@ -141,6 +143,7 @@ export default function StatsPanel() {
           </div>
         </Show>
       </Show>
-    </Panel>
+      </Panel>
+    </SettingItem>
   )
 }

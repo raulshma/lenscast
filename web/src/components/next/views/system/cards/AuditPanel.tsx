@@ -3,6 +3,7 @@ import type { AuditEntry, AuditLogResponse } from '../../../../../types'
 import { clearAuditLog, getAuditLog } from '../../../../../api/client'
 import { formatDateTime, t } from '../../../../../lib/i18n'
 import { Panel, FieldRow, Button, Badge, Empty, ConfirmDialog } from '../../../ui'
+import { SettingItem, useInspectorSection } from '../../../ui/SettingItem'
 
 const DEFAULT_LIMIT = 50
 
@@ -18,6 +19,8 @@ function formatTime(timestampMs: number): string {
  * demand, and can clear it (a ConfirmDialog guard).
  */
 export default function AuditPanel() {
+  const inspector = useInspectorSection()
+  const readOnly = () => inspector?.readOnly() === true
   const [audit, setAudit] = createSignal<AuditLogResponse | null>(null)
   const [busy, setBusy] = createSignal(false)
   const [error, setError] = createSignal('')
@@ -37,12 +40,12 @@ export default function AuditPanel() {
   }
 
   function clear() {
-    if (busy()) return
+    if (readOnly() || busy()) return
     setConfirmClear(true)
   }
 
   async function confirmClearLog() {
-    if (busy()) return
+    if (readOnly() || busy()) return
     setBusy(true)
     try {
       await clearAuditLog()
@@ -67,13 +70,14 @@ export default function AuditPanel() {
     entry.outcome === 'ok' ? ('success' as const) : ('danger' as const)
 
   return (
-    <Panel title={t('audit.title')}>
+    <SettingItem id="audit.list">
+      <Panel title={t('audit.title')}>
       <FieldRow label={t('audit.recent')}>
         <div class="nx-deterrence">
           <Button size="sm" variant="ghost" disabled={busy()} onClick={refresh}>
             {t('audit.refresh')}
           </Button>
-          <Button size="sm" variant="danger-soft" disabled={busy()} onClick={clear}>
+          <Button size="sm" variant="danger-soft" disabled={busy() || readOnly()} onClick={clear}>
             {t('audit.clear')}
           </Button>
         </div>
@@ -118,6 +122,7 @@ export default function AuditPanel() {
         onConfirm={confirmClearLog}
         onClose={() => setConfirmClear(false)}
       />
-    </Panel>
+      </Panel>
+    </SettingItem>
   )
 }

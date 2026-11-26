@@ -75,7 +75,14 @@ function fakeState(zones: MaskingZone[], help: () => boolean = () => false) {
   const [settings, setSettings] = createSignal<AllSettings | null>(doc(zones))
   const [playerMode, setPlayerMode] = createSignal<PlayerMode>('whep')
   const updateStreamingDebounced = vi.fn((_patch: Partial<AllSettings['streaming']>) => {})
-  const state: MaskEditState & { showShortcuts: () => boolean } = { settings, playerMode, setPlayerMode, updateStreamingDebounced, showShortcuts: help }
+  const state: MaskEditState & { showShortcuts: () => boolean; isViewer: () => boolean } = {
+    settings,
+    playerMode,
+    setPlayerMode,
+    updateStreamingDebounced,
+    showShortcuts: help,
+    isViewer: () => false,
+  }
   return { state, updateStreamingDebounced, setSettings }
 }
 

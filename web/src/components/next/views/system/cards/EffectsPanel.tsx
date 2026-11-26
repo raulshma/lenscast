@@ -3,6 +3,7 @@ import { SCENE_MODE_OPTIONS, HDR_LABELS } from '../../../../../types'
 import { API_DEFAULTS } from '../../../../../api/defaults'
 import { t } from '../../../../../lib/i18n'
 import { Panel, FieldRow, Select, ToggleField } from '../../../ui'
+import { SettingItem, useInspectorSection } from '../../../ui/SettingItem'
 
 /** Wire value → i18n key for the scene-mode options ('' = Auto). */
 const SCENE_KEYS: Record<string, string> = {
@@ -40,36 +41,50 @@ interface Props {
 }
 
 export default function EffectsPanel(props: Props) {
+  const inspector = useInspectorSection()
+  const readOnly = () => inspector?.readOnly() === true
+  const update = (patch: Partial<CameraSettings>) => {
+    if (!readOnly()) props.updateCamera(patch)
+  }
   const s = () => props.settings()
 
   return (
     <Panel title={t('effects.title')}>
       {/* Scene Mode */}
+      <SettingItem id="effects.sceneMode">
       <FieldRow label={t('effects.scene')}>
         <Select
+          disabled={readOnly()}
           value={s()?.camera?.sceneMode ?? API_DEFAULTS.cameraSceneMode}
           options={SCENE_MODE_OPTIONS.map((opt) => ({ value: opt.value, label: t(SCENE_KEYS[opt.value] ?? '') || opt.label }))}
-          onChange={(v) => props.updateCamera({ sceneMode: v === '' ? null : v })}
+          onChange={(v) => update({ sceneMode: v === '' ? null : v })}
           ariaLabel={t('effects.scene')}
         />
       </FieldRow>
+      </SettingItem>
 
       {/* Stabilization */}
+      <SettingItem id="effects.stabilization">
       <ToggleField
+        disabled={readOnly()}
         label={t('effects.stabilization')}
         checked={s()?.camera?.stabilization ?? API_DEFAULTS.cameraStabilization}
-        onChange={() => props.updateCamera({ stabilization: !(s()?.camera?.stabilization ?? API_DEFAULTS.cameraStabilization) })}
+        onChange={() => update({ stabilization: !(s()?.camera?.stabilization ?? API_DEFAULTS.cameraStabilization) })}
       />
+      </SettingItem>
 
       {/* HDR */}
+      <SettingItem id="effects.hdr">
       <FieldRow label={t('effects.hdr')}>
         <Select
+          disabled={readOnly()}
           value={s()?.camera?.hdrMode ?? API_DEFAULTS.cameraHdrMode}
           options={Object.keys(HDR_LABELS).map((k) => ({ value: k, label: t(HDR_KEYS[k as HdrMode]) }))}
-          onChange={(v) => props.updateCamera({ hdrMode: v as HdrMode })}
+          onChange={(v) => update({ hdrMode: v as HdrMode })}
           ariaLabel={t('effects.hdr')}
         />
       </FieldRow>
+      </SettingItem>
     </Panel>
   )
 }

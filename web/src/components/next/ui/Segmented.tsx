@@ -10,6 +10,7 @@ interface Props {
   value: string | undefined
   onChange: (v: string) => void
   ariaLabel?: string
+  disabled?: boolean
 }
 
 /** Segmented control for exclusive small option sets (filters, modes). */
@@ -23,6 +24,7 @@ export default function Segmented(props: Props) {
             type="button"
             class="nx-segment-btn"
             classList={{ 'nx-segment-btn-active': props.value === option.value }}
+            disabled={props.disabled}
             onClick={() => props.onChange(option.value)}
           >
             {option.label}

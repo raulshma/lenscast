@@ -13,6 +13,7 @@ import {
 import type { AuthSessionInfo } from '../../../../../api/client'
 import { formatTime, t } from '../../../../../lib/i18n'
 import { Panel, FieldRow, ToggleField, TextInput, Button, Empty } from '../../../ui'
+import { SettingItem, useInspectorSection } from '../../../ui/SettingItem'
 
 /**
  * Remote credential rotation + session management, ported from the classic
@@ -34,6 +35,8 @@ import { Panel, FieldRow, ToggleField, TextInput, Button, Empty } from '../../..
  * or `X-Api-Token`.
  */
 export default function AuthPanel() {
+  const inspector = useInspectorSection()
+  const readOnly = () => inspector?.readOnly() === true
   const [enabled, setEnabled] = createSignal(false)
   const [username, setUsername] = createSignal('')
   const [password, setPassword] = createSignal('')
@@ -97,7 +100,7 @@ export default function AuthPanel() {
   }
 
   async function generateToken() {
-    if (tokenBusy()) return
+    if (readOnly() || tokenBusy()) return
     setTokenBusy(true)
     setTokenMsg('')
     setGeneratedToken('')
@@ -144,7 +147,7 @@ export default function AuthPanel() {
   }
 
   async function toggleTokenEnabled() {
-    if (tokenBusy()) return
+    if (readOnly() || tokenBusy()) return
     setTokenBusy(true)
     setTokenMsg('')
     const next = !tokenEnabled()
@@ -177,7 +180,7 @@ export default function AuthPanel() {
   }
 
   async function apply() {
-    if (busy()) return
+    if (readOnly() || busy()) return
     setBusy(true)
     setMsg('')
     const enteredPassword = password()
@@ -201,6 +204,7 @@ export default function AuthPanel() {
   }
 
   async function revoke(prefix: string) {
+    if (readOnly()) return
     try {
       await revokeAuthSession(prefix)
       await refresh()
@@ -213,7 +217,7 @@ export default function AuthPanel() {
   // username edit, password set/rotate, enable/disable — revokes only the
   // viewer sessions, so this admin session survives and no re-login is owed.
   async function applyViewer() {
-    if (viewerBusy()) return
+    if (readOnly() || viewerBusy()) return
     setViewerBusy(true)
     setViewerMsg('')
     const enteredPassword = viewerPasswordDraft()
@@ -241,8 +245,10 @@ export default function AuthPanel() {
   createVisiblePoll(refresh, 10_000)
 
   return (
-    <Panel title={t('auth.title')} class="nx-panel-danger">
+    <SettingItem id="auth.config">
+      <Panel title={t('auth.title')} class="nx-panel-danger">
       <ToggleField
+        disabled={readOnly()}
         label={t('auth.require')}
         checked={enabled()}
         onChange={() => {
@@ -252,6 +258,7 @@ export default function AuthPanel() {
       />
       <Show when={enabled()}>
         <TextInput
+          disabled={readOnly()}
           type="text"
           placeholder={t('auth.usernamePlaceholder')}
           value={username()}
@@ -262,6 +269,7 @@ export default function AuthPanel() {
           ariaLabel={t('auth.usernamePlaceholder')}
         />
         <TextInput
+          disabled={readOnly()}
           type="password"
           placeholder={t('auth.passwordPlaceholder')}
           value={password()}
@@ -274,7 +282,7 @@ export default function AuthPanel() {
           flip stayed local and a reload reverted it to the server's
           enabled=true. apply() sends enabled() as-is, blank password
           included, so this button also persists the OFF state. */}
-      <Button size="sm" variant="primary" disabled={busy()} onClick={() => void apply()}>
+      <Button size="sm" variant="primary" disabled={busy() || readOnly()} onClick={() => void apply()}>
         {busy() ? t('auth.saving') : t('auth.save')}
       </Button>
       <Show when={msg()}>
@@ -283,6 +291,7 @@ export default function AuthPanel() {
 
       {/* Viewer access (optional read-only role) */}
       <ToggleField
+        disabled={readOnly()}
         label={t('auth.viewer')}
         checked={viewerEnabled()}
         onChange={() => {
@@ -292,6 +301,7 @@ export default function AuthPanel() {
       />
       <Show when={viewerEnabled()}>
         <TextInput
+          disabled={readOnly()}
           type="text"
           placeholder={t('auth.viewerUsername')}
           value={viewerUsername()}
@@ -302,13 +312,14 @@ export default function AuthPanel() {
           ariaLabel={t('auth.viewerUsername')}
         />
         <TextInput
+          disabled={readOnly()}
           type="password"
           placeholder={t('common.unchanged')}
           value={viewerPasswordDraft()}
           onInput={setViewerPasswordDraft}
           ariaLabel={t('common.unchanged')}
         />
-        <Button size="sm" variant="secondary" disabled={viewerBusy()} onClick={() => void applyViewer()}>
+        <Button size="sm" variant="secondary" disabled={viewerBusy() || readOnly()} onClick={() => void applyViewer()}>
           {viewerBusy() ? t('auth.saving') : t('auth.saveViewer')}
         </Button>
       </Show>
@@ -321,6 +332,7 @@ export default function AuthPanel() {
 
       {/* API token (read-only programmatic access) */}
       <ToggleField
+        disabled={readOnly()}
         label={t('auth.token')}
         checked={tokenEnabled()}
         onChange={() => void toggleTokenEnabled()}
@@ -328,7 +340,7 @@ export default function AuthPanel() {
       <FieldRow label={t('auth.configured')}>
         <span class="nx-mono nx-info-value">{tokenConfigured() ? t('auth.yes') : t('auth.no')}</span>
       </FieldRow>
-      <Button size="sm" variant="secondary" disabled={tokenBusy()} onClick={() => void generateToken()}>
+      <Button size="sm" variant="secondary" disabled={tokenBusy() || readOnly()} onClick={() => void generateToken()}>
         {tokenBusy() ? t('auth.saving') : t('auth.generate')}
       </Button>
       <Show when={generatedToken()}>
@@ -394,6 +406,7 @@ export default function AuthPanel() {
                 <Button
                   size="sm"
                   variant="danger-soft"
+                  disabled={readOnly()}
                   onClick={() => void revoke(session.tokenPrefix)}
                   ariaLabel={t('auth.revoke')}
                 >
@@ -406,6 +419,7 @@ export default function AuthPanel() {
       }>
         <Empty title={t('auth.noSessions')} />
       </Show>
-    </Panel>
+      </Panel>
+    </SettingItem>
   )
 }

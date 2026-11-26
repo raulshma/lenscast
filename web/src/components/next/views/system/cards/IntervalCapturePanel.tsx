@@ -3,6 +3,7 @@ import type { FlashMode, IntervalCaptureConfig } from '../../../../../types'
 import { FLASH_MODE_LABELS } from '../../../../../types'
 import { t } from '../../../../../lib/i18n'
 import { Panel, SliderField, FieldRow, Select, Button, Led, type SelectOption } from '../../../ui'
+import { SettingItem, useInspectorSection } from '../../../ui/SettingItem'
 
 /** Wire value → i18n key for the flash options. */
 const FLASH_KEYS: Record<FlashMode, string> = {
@@ -27,6 +28,11 @@ interface Props {
  * run is live, with a rec LED on the header while it is.
  */
 export default function IntervalCapturePanel(props: Props) {
+  const inspector = useInspectorSection()
+  const readOnly = () => inspector?.readOnly() === true
+  const setConfig = (value: IntervalCaptureConfig) => {
+    if (!readOnly()) props.setIntervalConfig(value)
+  }
   const cfg = () => props.intervalConfig()
 
   const flashOptions = (): SelectOption[] =>
@@ -37,6 +43,7 @@ export default function IntervalCapturePanel(props: Props) {
       title={t('interval.title')}
       badge={<Show when={props.intervalRunning()}><Led tone="rec" /></Show>}
     >
+      <SettingItem id="interval.status">
       <Show when={props.intervalRunning()}>
         {/* The run is the operator's on-air process: the amber presence,
             same voice as the recording panel's REC banner. */}
@@ -44,7 +51,10 @@ export default function IntervalCapturePanel(props: Props) {
           {t('interval.running', { count: props.intervalCompleted() })}
         </div>
       </Show>
+      </SettingItem>
 
+      <SettingItem id="interval.config">
+      <>
       {/* Interval */}
       <SliderField
         label={t('interval.interval')}
@@ -52,8 +62,8 @@ export default function IntervalCapturePanel(props: Props) {
         min={1}
         max={3600}
         value={cfg().intervalSeconds}
-        disabled={props.intervalRunning()}
-        onChange={(v) => props.setIntervalConfig({ ...cfg(), intervalSeconds: v })}
+        disabled={props.intervalRunning() || readOnly()}
+        onChange={(v) => setConfig({ ...cfg(), intervalSeconds: v })}
       />
 
       {/* Total Captures */}
@@ -63,8 +73,8 @@ export default function IntervalCapturePanel(props: Props) {
         min={1}
         max={1000}
         value={cfg().totalCaptures}
-        disabled={props.intervalRunning()}
-        onChange={(v) => props.setIntervalConfig({ ...cfg(), totalCaptures: v })}
+        disabled={props.intervalRunning() || readOnly()}
+        onChange={(v) => setConfig({ ...cfg(), totalCaptures: v })}
       />
 
       {/* Flash Mode */}
@@ -72,23 +82,39 @@ export default function IntervalCapturePanel(props: Props) {
         <Select
           value={cfg().flashMode}
           options={flashOptions()}
-          disabled={props.intervalRunning()}
-          onChange={(v) => props.setIntervalConfig({ ...cfg(), flashMode: v as FlashMode })}
+          disabled={props.intervalRunning() || readOnly()}
+          onChange={(v) => setConfig({ ...cfg(), flashMode: v as FlashMode })}
           ariaLabel={t('interval.flash')}
         />
       </FieldRow>
+      </>
+      </SettingItem>
 
+      <SettingItem id="interval.start-stop">
       {/* Start/Stop — a quiet outline start: this rack pairs the verb with
           the recording panel's, and two amber primaries would shout. */}
       {props.intervalRunning() ? (
-        <Button variant="danger" size="sm" onClick={props.handleStopIntervalCapture} ariaLabel={t('interval.stop')}>
+        <Button
+          variant="danger"
+          size="sm"
+          disabled={readOnly()}
+          onClick={() => { if (!readOnly()) props.handleStopIntervalCapture() }}
+          ariaLabel={t('interval.stop')}
+        >
           {t('interval.stop')}
         </Button>
       ) : (
-        <Button variant="secondary" size="sm" onClick={props.handleStartIntervalCapture} ariaLabel={t('interval.start')}>
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={readOnly()}
+          onClick={() => { if (!readOnly()) props.handleStartIntervalCapture() }}
+          ariaLabel={t('interval.start')}
+        >
           {t('interval.start')}
         </Button>
       )}
+      </SettingItem>
     </Panel>
   )
 }

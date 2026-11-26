@@ -6,6 +6,7 @@ import { statusTone } from '../../../../../lib/statusVariant'
 import { t } from '../../../../../lib/i18n'
 import { VARIANT_BANNER, VARIANT_LED } from './statusMaps'
 import { Panel, ToggleField, Field, TextInput, Button, Badge, Led, type BadgeTone } from '../../../ui'
+import { SettingItem, useInspectorSection } from '../../../ui/SettingItem'
 
 interface Props {
   settings: () => AllSettings | null
@@ -31,6 +32,14 @@ interface Props {
  * pipeline, exactly like the WHIP and RTSP pairs.
  */
 export default function RtmpPanel(props: Props) {
+  const inspector = useInspectorSection()
+  const readOnly = () => inspector?.readOnly() === true
+  const save = (patch: Partial<AllSettings['streaming']>) => {
+    if (!readOnly()) props.updateStreamingAndSave(patch)
+  }
+  const saveDebounced = (patch: Partial<AllSettings['streaming']>) => {
+    if (!readOnly()) props.updateStreamingDebounced(patch)
+  }
   const s = () => props.settings()
   const stream = () => s()?.streaming
   const rtmpOn = () => stream()?.rtmpEnabled ?? API_DEFAULTS.rtmpEnabled
@@ -64,7 +73,8 @@ export default function RtmpPanel(props: Props) {
   const chipTone = (): BadgeTone | null => statusTone(statusView().variant)
 
   return (
-    <Panel
+    <SettingItem id="streaming.rtmpEnabled">
+      <Panel
       title={t('rtmp.title')}
       badge={
         <Show when={chipTone()}>
@@ -78,9 +88,10 @@ export default function RtmpPanel(props: Props) {
       }
     >
       <ToggleField
+        disabled={readOnly()}
         label={t('rtmp.enable')}
         checked={rtmpOn()}
-        onChange={() => props.updateStreamingAndSave({ rtmpEnabled: !rtmpOn() })}
+        onChange={() => save({ rtmpEnabled: !rtmpOn() })}
       />
       <div class="nx-banner nx-banner-neutral" role="note" aria-live="polite">
         {t('rtmp.desc')}
@@ -89,13 +100,14 @@ export default function RtmpPanel(props: Props) {
       <Show when={rtmpOn()}>
         <Field label={t('rtmp.url')}>
           <TextInput
+            disabled={readOnly()}
             mono
             type="password"
             placeholder={`${t('common.unchanged')} rtmp://ingest.example.com/live/stream-key`}
             value={urlDraft()}
             onInput={(v) => {
               setUrlDraft(v)
-              props.updateStreamingDebounced({ rtmpUrl: v })
+              saveDebounced({ rtmpUrl: v })
             }}
             ariaLabel={t('rtmp.url')}
           />
@@ -124,8 +136,8 @@ export default function RtmpPanel(props: Props) {
           <Button
             variant="danger"
             size="sm"
-            disabled={props.streamActionLoading()}
-            onClick={props.handleStopRtmp}
+            disabled={props.streamActionLoading() || readOnly()}
+            onClick={() => { if (!readOnly()) props.handleStopRtmp() }}
             ariaLabel={t('rtmp.stop')}
           >
             {t('rtmp.stop')}
@@ -138,14 +150,15 @@ export default function RtmpPanel(props: Props) {
             // stored URL is unusable — the field is write-only (blank
             // never means unconfigured), so only the toggle gates here and
             // a refusal lands on the status line with its readable reason.
-            disabled={props.streamActionLoading() || !rtmpOn()}
-            onClick={props.handleStartRtmp}
+            disabled={props.streamActionLoading() || readOnly() || !rtmpOn()}
+            onClick={() => { if (!readOnly()) props.handleStartRtmp() }}
             ariaLabel={t('rtmp.start')}
           >
             {t('rtmp.start')}
           </Button>
         )}
       </Show>
-    </Panel>
+      </Panel>
+    </SettingItem>
   )
 }

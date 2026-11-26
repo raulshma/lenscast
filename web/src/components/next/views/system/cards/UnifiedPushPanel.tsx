@@ -8,6 +8,7 @@ import {
 } from '../../../../../api/client'
 import { t } from '../../../../../lib/i18n'
 import { Panel, FieldRow, ToggleField, Button, Empty } from '../../../ui'
+import { SettingItem, useInspectorSection } from '../../../ui/SettingItem'
 
 interface Props {
   settings: () => AllSettings | null
@@ -25,6 +26,8 @@ interface Props {
  * Auth card).
  */
 export default function UnifiedPushPanel(props: Props) {
+  const inspector = useInspectorSection()
+  const readOnly = () => inspector?.readOnly() === true
   const s = () => props.settings()
   const enabled = () => s()?.streaming.unifiedPushEnabled ?? API_DEFAULTS.unifiedPushEnabled
 
@@ -51,6 +54,7 @@ export default function UnifiedPushPanel(props: Props) {
   }
 
   async function remove(endpoint: string) {
+    if (readOnly()) return
     try {
       await removeUnifiedPushTarget(endpoint)
       await refresh()
@@ -75,15 +79,20 @@ export default function UnifiedPushPanel(props: Props) {
 
   return (
     <Panel title={t('unifiedPush.title')}>
+      <SettingItem id="unifiedpush.enabled">
       <ToggleField
+        disabled={readOnly()}
         label={t('unifiedPush.deviceToggle')}
         checked={enabled()}
-        onChange={() => props.updateStreamingAndSave({ unifiedPushEnabled: !enabled() })}
+        onChange={() => {
+          if (!readOnly()) props.updateStreamingAndSave({ unifiedPushEnabled: !enabled() })
+        }}
       />
       <div class="nx-banner nx-banner-neutral" role="note" aria-live="polite">
         <span>{t('unifiedPush.desc')}</span>
       </div>
-
+      </SettingItem>
+      <SettingItem id="unifiedpush.subscription">
       <FieldRow label={t('unifiedPush.vapidKey')}>
         <span class="nx-mono nx-info-value">{vapid() || t('unifiedPush.loading')}</span>
       </FieldRow>
@@ -111,6 +120,7 @@ export default function UnifiedPushPanel(props: Props) {
                 <Button
                   size="sm"
                   variant="danger-soft"
+                  disabled={loading() || readOnly()}
                   onClick={() => void remove(target.endpoint)}
                   ariaLabel={t('unifiedPush.remove')}
                 >
@@ -128,6 +138,7 @@ export default function UnifiedPushPanel(props: Props) {
           {message()}
         </span>
       </Show>
+      </SettingItem>
     </Panel>
   )
 }

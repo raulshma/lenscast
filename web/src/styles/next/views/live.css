@@ -847,6 +847,8 @@
 /* ── Mobile: the row wraps; chips stay tappable ───────────────────── */
 @media (max-width: 767px) {
   [data-ui='next'] .preview-section {
+    flex: none;
+    min-height: 0;
     padding: var(--space-sm);
   }
 

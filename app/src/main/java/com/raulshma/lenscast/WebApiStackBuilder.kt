@@ -22,6 +22,7 @@ import com.raulshma.lenscast.streaming.web.StatusWebHandler
 import com.raulshma.lenscast.streaming.web.StreamWebHandler
 import com.raulshma.lenscast.streaming.web.SystemWebHandler
 import com.raulshma.lenscast.streaming.web.UnifiedPushWebHandler
+import com.raulshma.lenscast.streaming.web.WebUiLayoutWebHandler
 
 /**
  * Composition root for the Web API: one handler module per domain, each
@@ -110,6 +111,7 @@ internal fun buildWebApiStack(
         app.automationFireJournal,
         testController = app.automationTestController,
     )
+    val uiLayoutHandler = WebUiLayoutWebHandler(app.settingsDataStore)
     val automationTest = AutomationTestWebHandler(controller = { app.automationTestController })
     // One instance for both the router's /api/stream routes and the
     // transport's viewer-demand seam on /stream.
@@ -123,6 +125,7 @@ internal fun buildWebApiStack(
             ),
             automation = automationHandler,
             automationTest = automationTest,
+            uiLayout = uiLayoutHandler,
             status = statusHandler,
             stream = streamHandler,
             capture = CaptureWebHandler(app.photoCaptureManager),
@@ -159,6 +162,7 @@ internal fun buildWebApiStack(
         unifiedPush = unifiedPushHandler,
         automation = automationHandler,
         automationTest = automationTest,
+        uiLayout = uiLayoutHandler,
     )
 }
 

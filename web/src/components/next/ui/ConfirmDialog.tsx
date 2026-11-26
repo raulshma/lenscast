@@ -33,19 +33,49 @@ interface Props {
  * close it; while `busy` the dialog locks until the action settles.
  */
 export default function ConfirmDialog(props: Props) {
+  let dialog: HTMLDivElement | undefined
+
   createEffect(() => {
     if (!props.open) return
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const focusable = () => Array.from(dialog?.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    ) ?? [])
+    queueMicrotask(() => focusable()[0]?.focus())
+
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !props.busy) props.onClose()
+      if (e.key === 'Escape' && !props.busy) {
+        props.onClose()
+        return
+      }
+      if (e.key !== 'Tab') return
+      const items = focusable()
+      const first = items[0]
+      const last = items[items.length - 1]
+      if (!first || !last) return
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault()
+        last.focus()
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault()
+        first.focus()
+      }
     }
     window.addEventListener('keydown', onKey)
-    onCleanup(() => window.removeEventListener('keydown', onKey))
+    onCleanup(() => {
+      window.removeEventListener('keydown', onKey)
+      document.body.style.overflow = previousOverflow
+      if (previousFocus?.isConnected) previousFocus.focus()
+    })
   })
 
   return (
     <Show when={props.open}>
       <div class="nx-modal-scrim" onClick={() => { if (!props.busy) props.onClose() }}>
         <div
+          ref={dialog}
           class="nx-modal nx-confirm"
           role="alertdialog"
           aria-modal="true"

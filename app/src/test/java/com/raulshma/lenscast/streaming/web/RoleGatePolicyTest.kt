@@ -36,8 +36,10 @@ class RoleGatePolicyTest {
             "/api/recordings/sessions", "/api/gallery", "/api/detection/events",
             "/api/detection/events/export", "/api/detection/stats", "/api/system",
             "/api/push/vapid-public", "/api/push/subscriptions",
-            "/api/push/unifiedpush",
+            "/api/push/unifiedpush", "/api/ui/layout",
         ),
+        // Layout persistence is an administrator configuration write.
+        "ui layout write" to listOf("/api/ui/layout"),
         // Every write route class the ApiRouter registers.
         "settings write" to listOf("/api/settings", "/api/settings/import", "/api/settings/ml-model/download"),
         "stream lifecycle" to listOf("/api/stream/start", "/api/stream/stop", "/api/stream/web/start", "/api/stream/web/stop"),

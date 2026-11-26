@@ -3,6 +3,7 @@ import { toCanvas } from 'qrcode'
 import { copyText, dashboardUrl } from '../../../../../lib/share'
 import { t } from '../../../../../lib/i18n'
 import { Panel, Button } from '../../../ui'
+import { SettingItem } from '../../../ui/SettingItem'
 
 function CopyButton(props: { text: () => string; label: string }) {
   const [copied, setCopied] = createSignal(false)
@@ -77,8 +78,9 @@ export default function SharePanel() {
   })
 
   return (
-    <Panel title={t('share.title')}>
-      <div class="share-card-body">
+    <SettingItem id="share.links">
+      <Panel title={t('share.title')}>
+        <div class="share-card-body">
         <div class="share-qr-wrap" title={t('share.qrTitle')}>
           <Show when={!qrError()} fallback={
             <span class="share-qr-error">{t('share.qrError')}</span>
@@ -101,6 +103,7 @@ export default function SharePanel() {
           </p>
         </div>
       </div>
-    </Panel>
+      </Panel>
+    </SettingItem>
   )
 }

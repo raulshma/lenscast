@@ -2,6 +2,7 @@ import { For, Show, createEffect, createSignal } from 'solid-js'
 import type { NextState } from './NextState'
 import type { NextThemeMode } from '../../hooks/useNextTheme'
 import { uiModeStore } from '../../lib/uiMode'
+import { useInspectorLayout } from '../../hooks/useInspectorLayout'
 import { pickStreamStatsChips, streamStatsOverlayStore } from '../../lib/streamStatsOverlay'
 import { hashRouter, isNextRoute, toNextRoute, type RouteName } from '../../lib/router'
 import { LOCALES, LOCALE_DISPLAY_NAMES, locale, setLocale, t, type Locale } from '../../lib/i18n'
@@ -73,6 +74,7 @@ function readStoredCompact(): boolean {
  */
 export default function NextShell(props: Props) {
   const state = props.state
+  const inspectorLayout = useInspectorLayout(state)
   const ui = uiModeStore()
   const router = hashRouter()
   const theme = props.theme
@@ -422,7 +424,7 @@ export default function NextShell(props: Props) {
             <MediaView state={state} />
           </Show>
         }>
-          <LiveView state={state} />
+          <LiveView state={state} inspectorLayout={inspectorLayout} />
         </Show>
       </div>
 

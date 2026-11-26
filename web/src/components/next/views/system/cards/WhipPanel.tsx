@@ -6,6 +6,7 @@ import { statusTone } from '../../../../../lib/statusVariant'
 import { t } from '../../../../../lib/i18n'
 import { VARIANT_BANNER, VARIANT_LED } from './statusMaps'
 import { Panel, ToggleField, Field, TextInput, Button, Badge, Led, type BadgeTone } from '../../../ui'
+import { SettingItem, useInspectorSection } from '../../../ui/SettingItem'
 
 interface Props {
   settings: () => AllSettings | null
@@ -30,6 +31,14 @@ interface Props {
  * stream-action pipeline, exactly like the RTSP pair.
  */
 export default function WhipPanel(props: Props) {
+  const inspector = useInspectorSection()
+  const readOnly = () => inspector?.readOnly() === true
+  const save = (patch: Partial<AllSettings['streaming']>) => {
+    if (!readOnly()) props.updateStreamingAndSave(patch)
+  }
+  const saveDebounced = (patch: Partial<AllSettings['streaming']>) => {
+    if (!readOnly()) props.updateStreamingDebounced(patch)
+  }
   const s = () => props.settings()
   const stream = () => s()?.streaming
   const whipOn = () => stream()?.whipEnabled ?? API_DEFAULTS.whipEnabled
@@ -62,7 +71,8 @@ export default function WhipPanel(props: Props) {
   const chipTone = (): BadgeTone | null => statusTone(statusView().variant)
 
   return (
-    <Panel
+    <SettingItem id="streaming.whipEnabled">
+      <Panel
       title={t('whip.title')}
       badge={
         <Show when={chipTone()}>
@@ -76,9 +86,10 @@ export default function WhipPanel(props: Props) {
       }
     >
       <ToggleField
+        disabled={readOnly()}
         label={t('whip.enable')}
         checked={whipOn()}
-        onChange={() => props.updateStreamingAndSave({ whipEnabled: !whipOn() })}
+        onChange={() => save({ whipEnabled: !whipOn() })}
       />
       <div class="nx-banner nx-banner-neutral" role="note" aria-live="polite">
         {t('whip.desc')}
@@ -87,23 +98,25 @@ export default function WhipPanel(props: Props) {
       <Show when={whipOn()}>
         <Field label={t('whip.url')}>
           <TextInput
+            disabled={readOnly()}
             mono
             placeholder="https://ingest.example.com/live/stream-key"
             value={whipUrl()}
-            onInput={(v) => props.updateStreamingDebounced({ whipUrl: v })}
+            onInput={(v) => saveDebounced({ whipUrl: v })}
             ariaLabel={t('whip.url')}
           />
         </Field>
 
         <Field label={t('whip.token')}>
           <TextInput
+            disabled={readOnly()}
             mono
             type="password"
             placeholder={t('common.unchanged')}
             value={tokenDraft()}
             onInput={(v) => {
               setTokenDraft(v)
-              props.updateStreamingDebounced({ whipToken: v })
+              saveDebounced({ whipToken: v })
             }}
             ariaLabel={t('whip.token')}
           />
@@ -111,10 +124,11 @@ export default function WhipPanel(props: Props) {
 
         <Field label={t('whip.stun')}>
           <TextInput
+            disabled={readOnly()}
             mono
             placeholder={stunField().placeholder}
             value={stream()?.whipStunServer ?? API_DEFAULTS.whipStunServer}
-            onInput={(v) => props.updateStreamingDebounced({ whipStunServer: v })}
+            onInput={(v) => saveDebounced({ whipStunServer: v })}
             ariaLabel={t('whip.stun')}
           />
         </Field>
@@ -142,8 +156,8 @@ export default function WhipPanel(props: Props) {
           <Button
             variant="danger"
             size="sm"
-            disabled={props.streamActionLoading()}
-            onClick={props.handleStopWhip}
+            disabled={props.streamActionLoading() || readOnly()}
+            onClick={() => { if (!readOnly()) props.handleStopWhip() }}
             ariaLabel={t('whip.stop')}
           >
             {t('whip.stop')}
@@ -155,14 +169,15 @@ export default function WhipPanel(props: Props) {
             // The server refuses a start when the push is disabled or the
             // endpoint is unusable — gate on both so the reason never has
             // to round-trip.
-            disabled={props.streamActionLoading() || !whipOn() || !whipUrl().trim()}
-            onClick={props.handleStartWhip}
+            disabled={props.streamActionLoading() || readOnly() || !whipOn() || !whipUrl().trim()}
+            onClick={() => { if (!readOnly()) props.handleStartWhip() }}
             ariaLabel={t('whip.start')}
           >
             {t('whip.start')}
           </Button>
         )}
       </Show>
-    </Panel>
+      </Panel>
+    </SettingItem>
   )
 }

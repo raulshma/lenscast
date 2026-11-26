@@ -18,6 +18,7 @@ import {
   type SessionRole,
   type SettingsExport,
   type SystemInfo,
+  type WebUiLayoutDto,
   FRAME_RATE_OPTIONS,
 } from './types'
 import { API_DEFAULTS } from './api/defaults'
@@ -36,6 +37,7 @@ import authConfigFixture from '../contract/auth-config.json'
 import systemFixture from '../contract/system.json'
 import detectionStatsFixture from '../contract/detection-stats.json'
 import automationFixture from '../contract/automation.json'
+import uiLayoutFixture from '../contract/ui-layout.json'
 import { AUTOMATION_ACTION_TYPES } from './lib/automation'
 import {
   RESTART_REASON_EXACT_ALARM_NOT_GRANTED,
@@ -49,11 +51,12 @@ import {
 // The checked-in JSON files in web/contract/ are the shared DTO contract:
 // app's DtoContractFixtureTest serializes the Kotlin DTOs (through the
 // production AppJson adapters) and asserts they match these exact files, so
-// any Kotlin-side shape change lands here and turns this suite red. The key
-// sets below are DERIVED from the fixtures (Object.keys), never hand-listed,
-// and every key assertion is exact (both directions) — a hand list could only
-// rot by matching a drifted fixture, and the fixtures are pinned to the real
-// DTOs by DtoContractFixtureTest. See CONTEXT.md "Web API Handlers".
+// any Kotlin-side shape change lands here and turns this suite red. Most key
+// sets below are DERIVED from the fixtures (Object.keys); small fixed wire
+// vocabularies list their fields explicitly where the names themselves are
+// the contract. Every key assertion is exact (both directions) — a hand list
+// could only rot by matching a drifted fixture, and the fixtures are pinned to
+// the real DTOs by DtoContractFixtureTest. See CONTEXT.md "Web API Handlers".
 
 /**
  * Exact key-set equality, both directions: the object's keys and the
@@ -163,6 +166,29 @@ const AUTOMATION_RULE_OPTIONAL_KEYS = ['lastFiredAt']
 const CAMERA_KEYS = keysOf(settingsFixture.camera)
 const STREAMING_KEYS = keysOf(settingsFixture.streaming)
 
+/** The exact /api/ui/layout wire keys, including every nullable/collection field. */
+const WEB_UI_LAYOUT_KEYS = [
+  'schemaVersion',
+  'updatedAtMs',
+  'activePresetId',
+  'column',
+  'sections',
+  'presets',
+]
+const WEB_UI_COLUMN_KEYS = ['widthPx', 'widthPreset', 'collapsed']
+const WEB_UI_SECTION_KEYS = [
+  'id',
+  'kind',
+  'sectionId',
+  'visible',
+  'collapsed',
+  'hiddenItems',
+  'customTitle',
+  'items',
+]
+const WEB_UI_PRESET_KEYS = ['id', 'name', 'column', 'sections']
+const DEFAULT_WEB_UI_SECTION_IDS = ['channels', 'storage', 'clients', 'masking-quick', 'system-info']
+
 describe('DTO contract fixtures', () => {
   it('settings fixture assigns to AllSettings', () => {
     const settings: AllSettings = settingsFixture as AllSettings
@@ -170,6 +196,50 @@ describe('DTO contract fixtures', () => {
     expectKeys(settings.camera as unknown as Record<string, unknown>, CAMERA_KEYS)
     expectKeys(settings.streaming as unknown as Record<string, unknown>, STREAMING_KEYS)
     expect(Array.isArray(settings.streaming.maskingZones)).toBe(true)
+  })
+
+  it('UI layout fixture assigns to WebUiLayoutDto', () => {
+    const layout: WebUiLayoutDto = uiLayoutFixture as WebUiLayoutDto
+    expectKeys(layout as unknown as Record<string, unknown>, WEB_UI_LAYOUT_KEYS)
+    expectKeys(layout.column as unknown as Record<string, unknown>, WEB_UI_COLUMN_KEYS)
+    expect(layout.sections).toHaveLength(5)
+    for (const section of layout.sections) {
+      expectKeys(section as unknown as Record<string, unknown>, WEB_UI_SECTION_KEYS)
+    }
+    expect(layout.presets).toHaveLength(1)
+    for (const preset of layout.presets) {
+      expectKeys(preset as unknown as Record<string, unknown>, WEB_UI_PRESET_KEYS)
+      expectKeys(preset.column as unknown as Record<string, unknown>, WEB_UI_COLUMN_KEYS)
+      for (const section of preset.sections) {
+        expectKeys(section as unknown as Record<string, unknown>, WEB_UI_SECTION_KEYS)
+      }
+    }
+    expect(layout.schemaVersion).toBe(1)
+    expect(layout.updatedAtMs).toBeGreaterThan(0)
+    expect(layout.activePresetId).toBe('default')
+    expect(layout.column).toEqual({ widthPx: 320, widthPreset: 'default', collapsed: false })
+    expect(layout.sections.map((section) => section.sectionId)).toEqual(DEFAULT_WEB_UI_SECTION_IDS)
+    expect(['compact', 'default', 'wide', 'custom']).toContain(layout.column.widthPreset)
+    for (const section of [...layout.sections, ...layout.presets.flatMap((preset) => preset.sections)]) {
+      expect(['builtin', 'custom']).toContain(section.kind)
+      expect(Array.isArray(section.hiddenItems)).toBe(true)
+      expect(Array.isArray(section.items)).toBe(true)
+      expect(section.customTitle === null || typeof section.customTitle === 'string').toBe(true)
+    }
+    const [preset] = layout.presets
+    expect(preset.id).toBe('preset_night_watch')
+    expect(preset.name).toBe('Night Watch')
+    expect(preset.column).toEqual({ widthPx: 380, widthPreset: 'custom', collapsed: false })
+    expect(preset.sections.find((section) => section.sectionId === 'channels')?.hiddenItems).toEqual(['channels.status'])
+    const custom = preset.sections.find((section) => section.kind === 'custom')
+    expect(custom).toMatchObject({
+      id: 'custom_night_controls',
+      sectionId: 'custom-custom_night_controls',
+      visible: true,
+      collapsed: false,
+      customTitle: 'Night Controls',
+      items: ['exposure.iso', 'exposure.time', 'streaming.audioEnabled'],
+    })
   })
 
   it('status fixture assigns to DeviceStatus', () => {
@@ -708,6 +778,51 @@ describe('API_DEFAULTS lockstep with the fixtures', () => {
     expect(nightMotion).toBeDefined()
     expect(nightMotion!.cooldownSeconds).toBe(120)
     expect(nightMotion!.missedRunPolicy).toBe('catch_up')
+  })
+
+  it('web UI layout fallbacks match the fixture defaults and sanitizer bounds', () => {
+    const layout: WebUiLayoutDto = uiLayoutFixture as WebUiLayoutDto
+    expect(API_DEFAULTS.webUiLayoutSchemaVersion).toBe(1)
+    expect(layout.schemaVersion).toBe(API_DEFAULTS.webUiLayoutSchemaVersion)
+    expect(layout.updatedAtMs).toBeGreaterThanOrEqual(0)
+    expect(layout.activePresetId).toBe('default')
+    expect(API_DEFAULTS.webUiLayoutColumnWidthMinPx).toBe(260)
+    expect(API_DEFAULTS.webUiLayoutColumnWidthDefaultPx).toBe(320)
+    expect(API_DEFAULTS.webUiLayoutColumnWidthMaxPx).toBe(560)
+    expect(layout.column).toEqual({
+      widthPx: API_DEFAULTS.webUiLayoutColumnWidthDefaultPx,
+      widthPreset: 'default',
+      collapsed: false,
+    })
+    expect(layout.sections).toEqual(DEFAULT_WEB_UI_SECTION_IDS.map((sectionId) => ({
+      id: sectionId,
+      kind: 'builtin',
+      sectionId,
+      visible: true,
+      collapsed: false,
+      hiddenItems: [],
+      customTitle: null,
+      items: [],
+    })))
+    expect(API_DEFAULTS.webUiLayoutMaxSections).toBe(48)
+    expect(API_DEFAULTS.webUiLayoutMaxCustomPresets).toBe(12)
+    expect(API_DEFAULTS.webUiLayoutMaxCustomItemsPerSection).toBe(24)
+    expect(API_DEFAULTS.webUiLayoutMaxTitleLength).toBe(48)
+    expect(API_DEFAULTS.webUiLayoutMaxPresetNameLength).toBe(40)
+    expect(layout.sections.length).toBeLessThanOrEqual(API_DEFAULTS.webUiLayoutMaxSections)
+    expect(layout.presets).toHaveLength(1)
+    expect(layout.presets.length).toBeLessThanOrEqual(API_DEFAULTS.webUiLayoutMaxCustomPresets)
+    for (const preset of layout.presets) {
+      expect(preset.name.length).toBeLessThanOrEqual(API_DEFAULTS.webUiLayoutMaxPresetNameLength)
+      expect(preset.sections.length).toBeLessThanOrEqual(API_DEFAULTS.webUiLayoutMaxSections)
+      expect(preset.column.widthPx).toBeGreaterThanOrEqual(API_DEFAULTS.webUiLayoutColumnWidthMinPx)
+      expect(preset.column.widthPx).toBeLessThanOrEqual(API_DEFAULTS.webUiLayoutColumnWidthMaxPx)
+      for (const section of preset.sections) {
+        expect(section.hiddenItems.length).toBeLessThanOrEqual(API_DEFAULTS.webUiLayoutMaxCustomItemsPerSection)
+        expect(section.items.length).toBeLessThanOrEqual(API_DEFAULTS.webUiLayoutMaxCustomItemsPerSection)
+        expect(section.customTitle?.length ?? 0).toBeLessThanOrEqual(API_DEFAULTS.webUiLayoutMaxTitleLength)
+      }
+    }
   })
 
   it('camera fallbacks match the settings fixture defaults', () => {

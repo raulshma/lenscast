@@ -3,6 +3,7 @@ import type { AllSettings } from '../../../../../types'
 import { API_DEFAULTS } from '../../../../../api/defaults'
 import { t } from '../../../../../lib/i18n'
 import { Panel, Field, ToggleField, TextInput, Button } from '../../../ui'
+import { SettingItem, useInspectorSection } from '../../../ui/SettingItem'
 
 interface Props {
   settings: () => AllSettings | null
@@ -21,6 +22,14 @@ interface Props {
  * them would wipe the input mid-typing on the next settings refresh.
  */
 export default function BackupPanel(props: Props) {
+  const inspector = useInspectorSection()
+  const readOnly = () => inspector?.readOnly() === true
+  const save = (patch: Partial<AllSettings['streaming']>) => {
+    if (!readOnly()) props.updateStreamingAndSave(patch)
+  }
+  const saveDebounced = (patch: Partial<AllSettings['streaming']>) => {
+    if (!readOnly()) props.updateStreamingDebounced(patch)
+  }
   const s = () => props.settings()
   const stream = () => s()?.streaming
   const backupOn = () => stream()?.backupEnabled ?? API_DEFAULTS.backupEnabled
@@ -30,11 +39,13 @@ export default function BackupPanel(props: Props) {
   const [telegramTokenDraft, setTelegramTokenDraft] = createSignal('')
 
   return (
-    <Panel title={t('backup.title')}>
+    <SettingItem id="backup.config">
+      <Panel title={t('backup.title')}>
       <ToggleField
+        disabled={readOnly()}
         label={t('backup.autoUpload')}
         checked={backupOn()}
-        onChange={() => props.updateStreamingAndSave({ backupEnabled: !backupOn() })}
+        onChange={() => save({ backupEnabled: !backupOn() })}
       />
 
       <Show when={backupOn()}>
@@ -45,7 +56,8 @@ export default function BackupPanel(props: Props) {
             size="sm"
             variant={!telegramSelected() ? 'toggled' : 'secondary'}
             ariaPressed={!telegramSelected()}
-            onClick={() => props.updateStreamingAndSave({ backupTarget: 'webdav' })}
+            disabled={readOnly()}
+            onClick={() => save({ backupTarget: 'webdav' })}
             ariaLabel="WebDAV"
           >
             WebDAV
@@ -54,7 +66,8 @@ export default function BackupPanel(props: Props) {
             size="sm"
             variant={telegramSelected() ? 'toggled' : 'secondary'}
             ariaPressed={telegramSelected()}
-            onClick={() => props.updateStreamingAndSave({ backupTarget: 'telegram' })}
+            disabled={readOnly()}
+            onClick={() => save({ backupTarget: 'telegram' })}
             ariaLabel="Telegram"
           >
             Telegram
@@ -63,35 +76,33 @@ export default function BackupPanel(props: Props) {
 
         <Field label={t('backup.webdavUrl')}>
           <TextInput
+            disabled={telegramSelected() || readOnly()}
             mono
-            type="url"
-            placeholder="https://cloud.example.com/remote.php/dav/files/user/LensCast"
-            disabled={telegramSelected()}
             value={stream()?.backupWebdavUrl ?? ''}
-            onInput={(v) => props.updateStreamingDebounced({ backupWebdavUrl: v })}
+            onInput={(v) => saveDebounced({ backupWebdavUrl: v })}
             ariaLabel={t('backup.webdavUrl')}
           />
         </Field>
 
         <Field label={t('common.username')}>
           <TextInput
+            disabled={telegramSelected() || readOnly()}
             type="text"
-            disabled={telegramSelected()}
             value={stream()?.backupWebdavUsername ?? ''}
-            onInput={(v) => props.updateStreamingDebounced({ backupWebdavUsername: v })}
+            onInput={(v) => saveDebounced({ backupWebdavUsername: v })}
             ariaLabel={t('common.username')}
           />
         </Field>
 
         <Field label={t('common.password')}>
           <TextInput
+            disabled={telegramSelected() || readOnly()}
             type="password"
             placeholder={t('common.unchanged')}
-            disabled={telegramSelected()}
             value={passwordDraft()}
             onInput={(v) => {
               setPasswordDraft(v)
-              props.updateStreamingDebounced({ backupWebdavPassword: v })
+              saveDebounced({ backupWebdavPassword: v })
             }}
             ariaLabel={t('common.password')}
           />
@@ -100,12 +111,13 @@ export default function BackupPanel(props: Props) {
         <Show when={telegramSelected()}>
           <Field label={t('backup.telegramToken')}>
             <TextInput
+              disabled={readOnly()}
               type="password"
               placeholder={t('backup.telegramTokenHint')}
               value={telegramTokenDraft()}
               onInput={(v) => {
                 setTelegramTokenDraft(v)
-                props.updateStreamingDebounced({ telegramBotToken: v })
+                saveDebounced({ telegramBotToken: v })
               }}
               ariaLabel={t('backup.telegramToken')}
             />
@@ -113,22 +125,25 @@ export default function BackupPanel(props: Props) {
 
           <Field label={t('backup.telegramChat')}>
             <TextInput
+              disabled={readOnly()}
               mono
               type="text"
               placeholder={t('backup.telegramChatHint')}
               value={stream()?.telegramChatId ?? ''}
-              onInput={(v) => props.updateStreamingDebounced({ telegramChatId: v })}
+              onInput={(v) => saveDebounced({ telegramChatId: v })}
               ariaLabel={t('backup.telegramChat')}
             />
           </Field>
         </Show>
 
         <ToggleField
+          disabled={readOnly()}
           label={t('backup.wifiOnly')}
           checked={stream()?.backupWifiOnly ?? API_DEFAULTS.backupWifiOnly}
-          onChange={() => props.updateStreamingAndSave({ backupWifiOnly: !(stream()?.backupWifiOnly ?? API_DEFAULTS.backupWifiOnly) })}
+          onChange={() => save({ backupWifiOnly: !(stream()?.backupWifiOnly ?? API_DEFAULTS.backupWifiOnly) })}
         />
       </Show>
-    </Panel>
+      </Panel>
+    </SettingItem>
   )
 }

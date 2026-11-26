@@ -1,5 +1,18 @@
-import { Show, createEffect, createSignal, onCleanup, untrack } from 'solid-js'
+import { For, Show, createEffect, createSignal, onCleanup, untrack, type JSX } from 'solid-js'
 import type { NextState } from '../NextState'
+import type { InspectorLayoutController } from '../../../hooks/useInspectorLayout'
+import {
+  applyPreset,
+  BUILTIN_PRESETS,
+  defaultInspectorLayout,
+  filterSectionsForRole,
+  inspectorWidthMax,
+  INSPECTOR_LAYOUT_LIMITS,
+  setColumnWidth,
+  toggleColumnCollapsed,
+  toggleSectionCollapsed,
+  toggleSectionVisibility,
+} from '../../../lib/inspectorLayout'
 import { registerStageSlot } from '../../../lib/pipStore'
 import { t } from '../../../lib/i18n'
 import { shortcutFor } from '../../../lib/shortcuts'
@@ -9,12 +22,11 @@ import {
   maskEditSession,
   setMaskEditSession,
 } from '../../../lib/maskEditStore'
-import { IconSliders } from '../../icons'
-import { Drawer, Skeleton, pushToast } from '../ui'
-import ChannelMatrix from './live/ChannelMatrix'
-import StoragePanel from './live/StoragePanel'
-import ClientsPanel from './live/ClientsPanel'
-import SystemInfoPanel from './live/SystemInfoPanel'
+import { IconChevronLeft, IconChevronRight, IconSliders } from '../../icons'
+import { Button, Drawer, Skeleton, pushToast } from '../ui'
+import InspectorConfigurator from '../InspectorConfigurator'
+import InspectorPanelFrame from '../ui/InspectorPanelFrame'
+import InspectorSectionContent from './live/InspectorSectionContent'
 import MaskEditBar from './live/masking/MaskEditBar'
 import MaskZoneInspector from './live/masking/MaskZoneInspector'
 import MaskingQuickPanel from './live/masking/MaskingQuickPanel'
@@ -53,9 +65,37 @@ import { webStreamActive } from './live/masking/webStreamActive'
  *    cleared. An armed edit is never left without a view to finish it — the
  *    mini-player must not inherit one.
  */
-export default function LiveView(props: { state: NextState }) {
+const FALLBACK_LAYOUT = defaultInspectorLayout()
+const FALLBACK_CONTROLLER: InspectorLayoutController = {
+  layout: () => FALLBACK_LAYOUT,
+  ready: () => true,
+  saving: () => false,
+  localOnly: () => false,
+  error: () => '',
+  mutate: () => {},
+  replaceLayout: () => {},
+  reset: async () => {},
+  refresh: async () => {},
+  flush: async () => {},
+}
+
+export default function LiveView(props: {
+  state: NextState
+  inspectorLayout?: InspectorLayoutController
+}) {
   const state = props.state
+  const inspectorLayout = () => props.inspectorLayout ?? FALLBACK_CONTROLLER
   const [drawerOpen, setDrawerOpen] = createSignal(false)
+  const [configuratorOpen, setConfiguratorOpen] = createSignal(false)
+  const [dragWidth, setDragWidth] = createSignal<number | null>(null)
+  let resizeStartX = 0
+  let resizeStartWidth = 0
+  let resizing = false
+
+  function openConfigurator(): void {
+    setDrawerOpen(false)
+    setConfiguratorOpen(true)
+  }
 
   // The slot the persistent StreamPreview host re-parents into while this
   // view is active; cleared on unmount so the host parks (or docks) instead
@@ -143,7 +183,10 @@ export default function LiveView(props: { state: NextState }) {
   // starts while it is open closes it, so it is not standing there with the
   // normal panels the moment the edit ends.
   createEffect(() => {
-    if (editing()) setDrawerOpen(false)
+    if (editing()) {
+      setDrawerOpen(false)
+      setConfiguratorOpen(false)
+    }
   })
 
   // ── The player rung stays put while an edit runs ─────────────────
@@ -210,23 +253,167 @@ export default function LiveView(props: { state: NextState }) {
     onCleanup(() => window.removeEventListener('keydown', onKeyDown, true))
   })
 
-  /** The normal inspector: the decks that tune the rig. Not offered while an edit is open. */
+  const visibleSections = () => filterSectionsForRole(
+    inspectorLayout().layout().sections.filter((section) => section.visible),
+    state.isViewer(),
+  )
+  const columnCollapsed = () => inspectorLayout().layout().column.collapsed && !editing()
+  const inspectorWidth = () => Math.min(dragWidth() ?? inspectorLayout().layout().column.widthPx, widthMax())
+  const widthMax = () => inspectorWidthMax(window.innerWidth)
+  const inspectorStyle = () => ({ '--nx-inspector-w': `${inspectorWidth()}px` }) as JSX.CSSProperties
+  const activePresetLabel = () => {
+    const active = inspectorLayout().layout().activePresetId
+    const custom = inspectorLayout().layout().presets.find((preset) => preset.id === active)
+    if (custom) return custom.name
+    switch (active) {
+      case 'camera-operator': return t('next.inspector.preset.cameraOperator')
+      case 'security-monitor': return t('next.inspector.preset.securityMonitor')
+      case 'streaming-links': return t('next.inspector.preset.streamingLinks')
+      case 'minimal': return t('next.inspector.preset.minimal')
+      default: return t('next.inspector.preset.default')
+    }
+  }
+  const presetKnown = () => BUILTIN_PRESETS.some((preset) => preset.id === inspectorLayout().layout().activePresetId)
+    || inspectorLayout().layout().presets.some((preset) => preset.id === inspectorLayout().layout().activePresetId)
+
+  function resizeStart(event: PointerEvent): void {
+    if (state.isViewer() || columnCollapsed() || editing()) return
+    resizing = true
+    resizeStartX = event.clientX
+    resizeStartWidth = inspectorWidth()
+    setDragWidth(resizeStartWidth)
+    const target = event.currentTarget as HTMLDivElement | null
+    if (!target) return
+    target.setPointerCapture?.(event.pointerId)
+    event.preventDefault()
+  }
+
+  function resizeMove(event: PointerEvent): void {
+    if (!resizing) return
+    const width = Math.round(resizeStartWidth + resizeStartX - event.clientX)
+    setDragWidth(Math.min(widthMax(), Math.max(INSPECTOR_LAYOUT_LIMITS.columnWidthMinPx, width)))
+  }
+
+  function resizeEnd(): void {
+    if (!resizing) return
+    resizing = false
+    const width = dragWidth()
+    setDragWidth(null)
+    if (width !== null) inspectorLayout().mutate((current) => setColumnWidth(current, width))
+  }
+
+  function resizeKey(event: KeyboardEvent): void {
+    if (state.isViewer() || columnCollapsed() || editing()) return
+    const current = inspectorWidth()
+    let next: number | null = null
+    if (event.key === 'ArrowLeft') next = current - 20
+    if (event.key === 'ArrowRight') next = current + 20
+    if (event.key === 'Home') next = INSPECTOR_LAYOUT_LIMITS.columnWidthMinPx
+    if (event.key === 'End') next = widthMax()
+    if (next === null) return
+    event.preventDefault()
+    inspectorLayout().mutate((layout) => setColumnWidth(layout, next!))
+  }
+
   const inspector = () => (
-    <>
-      <ChannelMatrix state={state} />
-      <Show when={state.settings()?.streaming}>
-        <StoragePanel
-          settings={state.settings}
-          updateStreamingAndSave={state.updateStreamingAndSave}
-          updateStreamingDebounced={state.updateStreamingDebounced}
-        />
-      </Show>
-      <ClientsPanel readOnly={state.isViewer} />
-      <Show when={state.settings()?.streaming}>
-        <MaskingQuickPanel state={state} />
-      </Show>
-      <SystemInfoPanel />
-    </>
+    <div class="nx-inspector-inner">
+      <header class="nx-inspector-head">
+        <select
+          class="nx-input nx-select nx-inspector-preset"
+          aria-label={t('next.inspector.configurator.presets')}
+          value={inspectorLayout().layout().activePresetId}
+          disabled={state.isViewer()}
+          onChange={(event) => inspectorLayout().mutate((current) => applyPreset(current, event.currentTarget.value))}
+        >
+          <For each={BUILTIN_PRESETS}>
+            {(preset) => (
+              <option value={preset.id}>
+                {preset.id === 'default'
+                  ? t('next.inspector.preset.default')
+                  : preset.id === 'camera-operator'
+                    ? t('next.inspector.preset.cameraOperator')
+                    : preset.id === 'security-monitor'
+                      ? t('next.inspector.preset.securityMonitor')
+                      : preset.id === 'streaming-links'
+                        ? t('next.inspector.preset.streamingLinks')
+                        : t('next.inspector.preset.minimal')}
+              </option>
+            )}
+          </For>
+          <Show when={!presetKnown()}>
+            <option value={inspectorLayout().layout().activePresetId}>{activePresetLabel()}</option>
+          </Show>
+          <For each={inspectorLayout().layout().presets}>
+            {(preset) => <option value={preset.id}>{preset.name}</option>}
+          </For>
+        </select>
+        <Show when={!state.isViewer()}>
+          <Button
+            size="sm"
+            variant="secondary"
+            class="nx-inspector-customize"
+            onClick={openConfigurator}
+          >
+            {t('next.inspector.customize')}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            icon
+            class="nx-inspector-column-toggle"
+            ariaLabel={columnCollapsed()
+              ? t('next.inspector.expand')
+              : t('next.inspector.collapse')}
+            title={columnCollapsed() ? t('next.inspector.expand') : t('next.inspector.collapse')}
+            onClick={() => inspectorLayout().mutate(toggleColumnCollapsed)}
+          >
+            <IconChevronRight size={14} />
+          </Button>
+        </Show>
+        <Show when={inspectorLayout().saving()}>
+          <span class="nx-inspector-saving" role="status">{t('next.inspector.configurator.saving')}</span>
+        </Show>
+      </header>
+      <fieldset class="nx-inspector-panels" disabled={state.isViewer()}>
+        <Show
+          when={visibleSections().length > 0}
+          fallback={<div class="nx-inspector-empty">{t('next.inspector.emptyLayout')}</div>}
+        >
+          <For each={visibleSections()}>
+            {(section) => (
+              <InspectorPanelFrame
+                section={section}
+                readOnly={state.isViewer}
+                onToggleCollapsed={state.isViewer()
+                  ? undefined
+                  : () => inspectorLayout().mutate((current) => toggleSectionCollapsed(current, section.id))}
+                onHide={state.isViewer()
+                  ? undefined
+                  : () => inspectorLayout().mutate((current) => toggleSectionVisibility(current, section.id))}
+                emptyState={
+                  <div class="nx-inspector-empty">
+                    <span>{t('next.inspector.allHidden')}</span>
+                    <Show when={!state.isViewer()}>
+                      <Button size="sm" variant="ghost" onClick={() => setConfiguratorOpen(true)}>
+                        {t('next.inspector.configurator.configureItems')}
+                      </Button>
+                    </Show>
+                  </div>
+                }
+              >
+                <InspectorSectionContent
+                  state={state}
+                  kind={section.kind}
+                  sectionId={section.sectionId}
+                  items={section.items}
+                  readOnly={state.isViewer()}
+                />
+              </InspectorPanelFrame>
+            )}
+          </For>
+        </Show>
+      </fieldset>
+    </div>
   )
 
   return (
@@ -253,9 +440,42 @@ export default function LiveView(props: { state: NextState }) {
 
         {/* The inspector column: the normal decks, or — while an edit is
             open — the zones. Never both. */}
-        <aside class="nx-inspector">
-          <Show when={editor()} keyed fallback={inspector()}>
+        <aside
+          class="nx-inspector"
+          classList={{ 'nx-inspector-collapsed': columnCollapsed() }}
+          style={inspectorStyle()}
+          aria-label={t('next.inspector')}
+        >
+          <Show when={editor()} keyed fallback={drawerOpen() ? null : inspector()}>
             {(session) => <MaskZoneInspector session={session} />}
+          </Show>
+          <Show when={!editor()}>
+            <button
+              type="button"
+              class="nx-inspector-reopen"
+              aria-label={t('next.inspector.expand')}
+              title={t('next.inspector.expand')}
+              disabled={state.isViewer()}
+              onClick={() => inspectorLayout().mutate(toggleColumnCollapsed)}
+            >
+              <IconChevronLeft size={16} />
+            </button>
+            <div
+              class="nx-inspector-resizer"
+              role="separator"
+              aria-label={t('next.inspector.resize')}
+              aria-orientation="vertical"
+              aria-valuemin={INSPECTOR_LAYOUT_LIMITS.columnWidthMinPx}
+              aria-valuemax={widthMax()}
+              aria-valuenow={inspectorWidth()}
+              aria-disabled={state.isViewer() || undefined}
+              tabIndex={state.isViewer() ? -1 : 0}
+              onPointerDown={resizeStart}
+              onPointerMove={resizeMove}
+              onPointerUp={resizeEnd}
+              onPointerCancel={resizeEnd}
+              onKeyDown={resizeKey}
+            />
           </Show>
         </aside>
       </div>
@@ -278,6 +498,12 @@ export default function LiveView(props: { state: NextState }) {
         <Drawer open={drawerOpen()} onClose={() => setDrawerOpen(false)} title={t('view.live')}>
           {inspector()}
         </Drawer>
+        <InspectorConfigurator
+          open={configuratorOpen() && !editing()}
+          onClose={() => setConfiguratorOpen(false)}
+          state={state}
+          layout={inspectorLayout()}
+        />
       </Show>
     </div>
   )

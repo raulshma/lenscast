@@ -1,6 +1,6 @@
-import { createSignal, For, Show } from 'solid-js'
+import { createEffect, createSignal, For, Show } from 'solid-js'
 import type { AutomationRuleDto, AutomationStateDto } from '../../../../types'
-import { getAutomation, putAutomation } from '../../../../api/client'
+import { getAutomation, putAutomation, restoreAutomationTest, testAutomation } from '../../../../api/client'
 import { formatDate, t } from '../../../../lib/i18n'
 import { createVisiblePoll } from '../../../../hooks/visiblePoll'
 import {
@@ -26,6 +26,7 @@ import Empty from '../../ui/Empty'
 import Led from '../../ui/Led'
 import Panel from '../../ui/Panel'
 import ConfirmDialog from '../../ui/ConfirmDialog'
+import { SettingItem, useInspectorSection } from '../../ui/SettingItem'
 import AutomationRuleEditor from '../../../AutomationRuleEditor'
 
 interface Props {
@@ -40,8 +41,9 @@ interface Props {
  * their DOM but read as quiet journal rows on the panel, separated by
  * 1px rules — no nested cards; the catalog-driven editor keeps its
  * styling through the token bridge. Fetches its own document, refetches
- * on a 60s visibility-gated poll, and every mutation PUTs the whole
- * { enabled, rules } document.
+ * on a 60s visibility-gated poll, PUTs the whole { enabled, rules }
+ * document for rule edits, and uses the dedicated test/restore routes for
+ * the one-shot Automation Test.
  */
 export default function AutomationPanel(props: Props) {
   const [state, setState] = createSignal<AutomationStateDto | null>(null)
@@ -52,8 +54,19 @@ export default function AutomationPanel(props: Props) {
   const [editing, setEditing] = createSignal<AutomationRuleDto | null>(null)
   const [isNewRule, setIsNewRule] = createSignal(false)
   const [pendingRemove, setPendingRemove] = createSignal<AutomationRuleDto | null>(null)
+  const [pendingTest, setPendingTest] = createSignal<AutomationRuleDto | null>(null)
+  const [testing, setTesting] = createSignal(false)
 
-  const readOnly = () => props.readOnly?.() ?? false
+  const inspector = useInspectorSection()
+  const readOnly = () => props.readOnly?.() === true || inspector?.readOnly() === true
+  // A role/layout change must not leave a mutation dialog armed. The handler
+  // guards below remain the authoritative barrier for dispatched events.
+  createEffect(() => {
+    if (!readOnly()) return
+    setPendingRemove(null)
+    setPendingTest(null)
+    setEditing(null)
+  })
   // The editor contract's caps/presets: device truth once fetched
   // (AutomationStateDto.limits), the contract-test-pinned fallback before.
   const limits = () => automationLimits(state())
@@ -119,6 +132,7 @@ export default function AutomationPanel(props: Props) {
 
   /** The one persist seam: PUT the whole document, adopt the sanitized response. True = the response was adopted. */
   async function persist(enabled: boolean, rules: AutomationRuleDto[]): Promise<boolean> {
+    if (readOnly()) return false
     setSaving(true)
     setSaveError('')
     try {
@@ -154,7 +168,7 @@ export default function AutomationPanel(props: Props) {
   function confirmRemoveRule() {
     const rule = pendingRemove()
     const current = state()
-    if (!rule || !current || saving()) return
+    if (!rule || !current || readOnly() || saving()) return
     setPendingRemove(null)
     void persist(current.enabled, current.rules.filter((entry) => entry.id !== rule.id))
   }
@@ -164,6 +178,46 @@ export default function AutomationPanel(props: Props) {
     if (!current || readOnly() || saving() || atRuleCap()) return
     const copyName = rule.name ? t('automation.ruleCopyOf', { name: rule.name }) : t('automation.ruleCopy')
     void persist(current.enabled, withRuleDuplicated(current.rules, rule.id, copyName, limits().maxRules))
+  }
+
+  // The Automation Test: fire a rule once through the real executor, retain
+  // the device's pre-test snapshot, and offer Restore until it is wound back.
+  // These are the same client operations the classic card uses; the next UI
+  // only supplies the themed confirmation and per-rule controls.
+  const armedRuleId = () => state()?.testArmedRuleId ?? null
+
+  function runTest(rule: AutomationRuleDto) {
+    if (readOnly() || testing()) return
+    setPendingTest(rule)
+  }
+
+  async function confirmRunTest() {
+    const rule = pendingTest()
+    if (!rule || readOnly() || testing()) return
+    setPendingTest(null)
+    setTesting(true)
+    try {
+      await testAutomation(rule.id)
+      await reload(true)
+    } catch {
+      // The device answers errors in-band; a transport failure resurfaces
+      // on the next visibility-gated poll, matching the classic card.
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  async function restoreTest() {
+    if (readOnly() || testing()) return
+    setTesting(true)
+    try {
+      await restoreAutomationTest()
+      await reload(true)
+    } catch {
+      // Same in-band contract as the arm.
+    } finally {
+      setTesting(false)
+    }
   }
 
   function editRule(rule: AutomationRuleDto) {
@@ -191,7 +245,7 @@ export default function AutomationPanel(props: Props) {
    */
   async function handleEditorSave(rule: AutomationRuleDto): Promise<boolean> {
     const current = state()
-    if (!current || saving()) return false
+    if (!current || readOnly() || saving()) return false
     let rules: AutomationRuleDto[]
     if (rule.id !== '') {
       rules = current.rules.map((entry) => (entry.id === rule.id ? rule : entry))
@@ -224,50 +278,57 @@ export default function AutomationPanel(props: Props) {
           </div>
         </Show>
 
-        <ToggleField
-          label={t('automation.masterEnabled')}
-          checked={state()!.enabled}
-          disabled={readOnly() || saving()}
-          onChange={toggleMaster}
-        />
-        {/* Rules stay visible (and editable) while the engine is off — a
-            banner explains they will not fire until it is on. */}
-        <Show when={!state()!.enabled}>
-          <div class="nx-banner nx-banner-warning" role="note" aria-live="polite">
-            {t('automation.engineOffBanner')}
-          </div>
-        </Show>
-        <Show when={state()!.rules.length > 0}>
-          <span class="nx-field-hint">
-            {t('automation.rulesCount', { count: state()!.rules.length, total: limits().maxRules })}
-          </span>
-        </Show>
+        <SettingItem id="automation.rules">
+          <>
+            <ToggleField
+              label={t('automation.masterEnabled')}
+              checked={state()!.enabled}
+              disabled={readOnly() || saving()}
+              onChange={toggleMaster}
+            />
+            {/* Rules stay visible (and editable) while the engine is off — a
+                banner explains they will not fire until it is on. */}
+            <Show when={!state()!.enabled}>
+              <div class="nx-banner nx-banner-warning" role="note" aria-live="polite">
+                {t('automation.engineOffBanner')}
+              </div>
+            </Show>
+            <Show when={state()!.rules.length > 0}>
+              <span class="nx-field-hint">
+                {t('automation.rulesCount', { count: state()!.rules.length, total: limits().maxRules })}
+              </span>
+            </Show>
+          </>
+        </SettingItem>
 
         {/* The empty state: what rules do, plus the one action in the
             kit's action slot — the add button below stays for the
             non-empty list. */}
-        <Show when={state()!.rules.length === 0}>
-          <Empty
-            title={t('automation.emptyTitle')}
-            hint={t('automation.emptyBody')}
-            icon={<AutomationBoltGlyph />}
-            action={
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={addRule}
-                disabled={readOnly() || saving() || atRuleCap()}
-                ariaLabel={t('automation.addRule')}
-              >
-                {t('automation.addRule')}
-              </Button>
-            }
-          />
-        </Show>
+        <SettingItem id="automation.rules">
+          <Show when={state()!.rules.length === 0}>
+            <Empty
+              title={t('automation.emptyTitle')}
+              hint={t('automation.emptyBody')}
+              icon={<AutomationBoltGlyph />}
+              action={
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={addRule}
+                  disabled={readOnly() || saving() || atRuleCap()}
+                  ariaLabel={t('automation.addRule')}
+                >
+                  {t('automation.addRule')}
+                </Button>
+              }
+            />
+          </Show>
+        </SettingItem>
 
         <For each={state()!.rules}>
           {(rule) => (
             <div class="automation-rule-row" classList={{ 'automation-rule-disabled': !rule.enabled }}>
+              <SettingItem id="automation.rules">
               <div class="automation-rule-head">
                 {/* The badge + name zone taps to edit; the switch and the
                     button row stay separate targets. */}
@@ -309,7 +370,9 @@ export default function AutomationPanel(props: Props) {
                   <span class="nx-switch-thumb" aria-hidden="true" />
                 </label>
               </div>
+              </SettingItem>
 
+              <SettingItem id="automation.rules">
               <div class="automation-when-rows">
                 <Show when={rule.triggerType !== 'time_of_day'}>
                   <div class="automation-when-row automation-when">
@@ -364,66 +427,122 @@ export default function AutomationPanel(props: Props) {
                   )}
                 </Show>
               </div>
+              </SettingItem>
 
               <div class="automation-rule-buttons">
-                <Button size="sm" variant="ghost" onClick={() => editRule(rule)} disabled={readOnly()} title={t('automation.editRuleAria')} ariaLabel={t('automation.editRuleAria')}>
-                  {t('automation.edit')}
-                </Button>
-                <Button size="sm" variant="ghost" onClick={() => duplicateRule(rule)} disabled={readOnly() || saving() || atRuleCap()} title={t('automation.duplicateRuleAria')} ariaLabel={t('automation.duplicateRuleAria')}>
-                  {t('automation.duplicate')}
-                </Button>
-                <Button size="sm" variant="danger-soft" onClick={() => removeRule(rule)} disabled={readOnly() || saving()} title={t('automation.deleteRuleAria')} ariaLabel={t('automation.deleteRuleAria')}>
-                  {t('common.delete')}
-                </Button>
+                <SettingItem id="automation.rules">
+                  <Button size="sm" variant="ghost" onClick={() => editRule(rule)} disabled={readOnly()} title={t('automation.editRuleAria')} ariaLabel={t('automation.editRuleAria')}>
+                    {t('automation.edit')}
+                  </Button>
+                </SettingItem>
+                <SettingItem id="automation.test">
+                  <Show
+                    when={armedRuleId() === rule.id}
+                    fallback={
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => runTest(rule)}
+                        disabled={readOnly() || testing()}
+                        title={t('automation.testAria')}
+                        ariaLabel={t('automation.testAria')}
+                      >
+                        {t('automation.test')}
+                      </Button>
+                    }
+                  >
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      onClick={restoreTest}
+                      disabled={readOnly() || testing()}
+                      title={t('automation.restoreAria')}
+                      ariaLabel={t('automation.restoreAria')}
+                    >
+                      {t('automation.restore')}
+                    </Button>
+                  </Show>
+                </SettingItem>
+                <SettingItem id="automation.rules">
+                  <>
+                    <Button size="sm" variant="ghost" onClick={() => duplicateRule(rule)} disabled={readOnly() || saving() || atRuleCap()} title={t('automation.duplicateRuleAria')} ariaLabel={t('automation.duplicateRuleAria')}>
+                      {t('automation.duplicate')}
+                    </Button>
+                    <Button size="sm" variant="danger-soft" onClick={() => removeRule(rule)} disabled={readOnly() || saving()} title={t('automation.deleteRuleAria')} ariaLabel={t('automation.deleteRuleAria')}>
+                      {t('common.delete')}
+                    </Button>
+                  </>
+                </SettingItem>
               </div>
             </div>
           )}
         </For>
 
-        <Show when={state()!.rules.length > 0}>
-          <div class="nx-automation-add">
-            <Button variant="primary" size="sm" onClick={addRule} disabled={readOnly() || saving() || atRuleCap()} ariaLabel={t('automation.addRule')}>
-              {t('automation.addRule')}
-            </Button>
-            <Show when={atRuleCap()}>
-              <span class="nx-field-hint">{t('automation.maxRulesReached', { count: limits().maxRules })}</span>
-            </Show>
-          </div>
-        </Show>
+        <SettingItem id="automation.rules">
+          <Show when={state()!.rules.length > 0}>
+            <div class="nx-automation-add">
+              <Button variant="primary" size="sm" onClick={addRule} disabled={readOnly() || saving() || atRuleCap()} ariaLabel={t('automation.addRule')}>
+                {t('automation.addRule')}
+              </Button>
+              <Show when={atRuleCap()}>
+                <span class="nx-field-hint">{t('automation.maxRulesReached', { count: limits().maxRules })}</span>
+              </Show>
+            </div>
+          </Show>
+        </SettingItem>
 
-        <Show when={saving()}>
-          <div class="nx-banner nx-banner-neutral" role="note">{t('automation.saving')}</div>
-        </Show>
-        <Show when={saveError()}>
-          <div class="nx-banner nx-banner-danger" role="alert">{saveError()}</div>
-        </Show>
+        <SettingItem id="automation.rules">
+          <Show when={saving()}>
+            <div class="nx-banner nx-banner-neutral" role="note">{t('automation.saving')}</div>
+          </Show>
+          <Show when={saveError()}>
+            <div class="nx-banner nx-banner-danger" role="alert">{saveError()}</div>
+          </Show>
+        </SettingItem>
       </Show>
 
-      <Show when={editing()} keyed>
-        {(draft) => (
-          <AutomationRuleEditor
-            draft={draft}
-            isNew={isNewRule()}
-            catalog={state()?.catalog ?? []}
-            triggers={state()?.triggers ?? []}
-            conditions={state()?.conditions ?? []}
-            limits={limits()}
-            saving={saving()}
-            onClose={() => setEditing(null)}
-            onSave={handleEditorSave}
-          />
-        )}
-      </Show>
+      <SettingItem id="automation.rules">
+        <Show when={editing()} keyed>
+          {(draft) => (
+            <AutomationRuleEditor
+              draft={draft}
+              isNew={isNewRule()}
+              catalog={state()?.catalog ?? []}
+              triggers={state()?.triggers ?? []}
+              conditions={state()?.conditions ?? []}
+              limits={limits()}
+              saving={saving()}
+              onClose={() => setEditing(null)}
+              onSave={handleEditorSave}
+            />
+          )}
+        </Show>
+      </SettingItem>
 
-      <ConfirmDialog
-        open={pendingRemove() !== null}
-        title={t('common.delete')}
-        message={t('automation.deleteConfirm', { name: pendingRemove()?.name || t('automation.ruleUnnamed') })}
-        danger
-        busy={saving()}
-        onConfirm={confirmRemoveRule}
-        onClose={() => setPendingRemove(null)}
-      />
+      <SettingItem id="automation.rules">
+        <ConfirmDialog
+          open={pendingRemove() !== null}
+          title={t('common.delete')}
+          message={t('automation.deleteConfirm', { name: pendingRemove()?.name || t('automation.ruleUnnamed') })}
+          danger
+          busy={saving()}
+          onConfirm={confirmRemoveRule}
+          onClose={() => setPendingRemove(null)}
+        />
+      </SettingItem>
+
+      <SettingItem id="automation.test">
+        <ConfirmDialog
+          open={pendingTest() !== null}
+          title={t('automation.test')}
+          message={t('automation.testConfirm', { name: pendingTest()?.name || t('automation.ruleUnnamed') })}
+          confirmLabel={t('automation.test')}
+          danger
+          busy={testing()}
+          onConfirm={confirmRunTest}
+          onClose={() => { if (!testing()) setPendingTest(null) }}
+        />
+      </SettingItem>
     </Panel>
   )
 }
