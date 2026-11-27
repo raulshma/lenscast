@@ -63,6 +63,10 @@ app data survives:
 adb install -r -d app/build/outputs/apk/store/debug/app-store-debug.apk
 ```
 
+To then **drive and observe the device over HTTP** — launch, auth/CSRF,
+the routes worth knowing, logcat observables — see
+[docs/device-testing.md](docs/device-testing.md).
+
 ## Test
 
 CI runs all of these on every PR and every push to `main`; a change is not
@@ -75,6 +79,13 @@ one that drifts quietly after web-only work:
 ```bash
 ./gradlew :app:testStoreDebugUnitTest :app:testFdroidDebugUnitTest
 ```
+
+Running the JVM pair together with `:app:lintStoreDebug` in one invocation
+at default workers intermittently trips the 5-second wall-clock timeouts in
+the companion-console tests (`SettingsApplierTest`, `RemoteSettingsSourceTest`,
+the `Remote*SourceTest` family) — a false red under load, not a regression.
+Run the combined check with `--max-workers=2`; CI never sees this shape
+because it runs each suite as a separate Gradle invocation.
 
 ```bash
 # Android JVM unit tests — both flavors
@@ -91,6 +102,10 @@ npm run typecheck   # tsc --noEmit
 npm run test        # vitest run
 npm run build       # production build (also runs as part of Gradle)
 ```
+
+For web-console debugging **without a device**, `scripts/web/` holds a
+mock-API + headless-Chromium rig that drives the real app — see
+`scripts/README.md`.
 
 ## Lint
 

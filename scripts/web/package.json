@@ -1,0 +1,8 @@
+{
+  "name": "lenscast-web-e2e",
+  "private": true,
+  "description": "Mock-API + Playwright rig for debugging the beta web UI without a device — see scripts/README.md",
+  "devDependencies": {
+    "playwright-core": "^1.49.0"
+  }
+}

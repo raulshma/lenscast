@@ -9,9 +9,14 @@
 .cxx
 local.properties
 /app/src/main/assets/webui/
-/web/node_modules/
+node_modules/
 *.jks
 *.keystore
 
+/scripts/web/out/
+
 # Kotlin daemon/session artifacts
 .kotlin/
+
+# Python bytecode from the verification scripts
+__pycache__/
