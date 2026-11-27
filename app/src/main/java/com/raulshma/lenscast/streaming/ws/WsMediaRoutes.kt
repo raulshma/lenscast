@@ -59,7 +59,22 @@ class WsMediaRoutes(
         val vps: ByteArray?,
         val sps: ByteArray,
         val pps: ByteArray,
-    )
+    ) {
+        fun matches(other: CachedVideoConfig): Boolean =
+            isHevc == other.isHevc &&
+                ((vps == null && other.vps == null) ||
+                    (vps != null && other.vps != null && vps.contentEquals(other.vps))) &&
+                sps.contentEquals(other.sps) &&
+                pps.contentEquals(other.pps)
+
+        fun toConfigPayload(): ByteArray? =
+            if (isHevc) {
+                val v = vps ?: return null
+                WsVideoProtocol.hevcVideoConfig(v, sps, pps)
+            } else {
+                WsVideoProtocol.videoConfig(sps, pps)
+            }
+    }
 
     @Volatile private var cachedVideoConfig: CachedVideoConfig? = null
 
@@ -70,19 +85,39 @@ class WsMediaRoutes(
     fun feedVideo(nalUnits: List<com.raulshma.lenscast.streaming.rtsp.EncodedNalUnit>) {
         if (nalUnits.isEmpty()) return
         val raw = nalUnits.map { it.data }
-        // Codec detection per AU: the HEVC VPS/SPS/PPS triple is only present
-        // in HEVC keyframes, the AVC SPS/PPS pair in H.264 ones — whichever
-        // appears (re)marks the cached codec, so a mid-stream codec flip
-        // re-configures joining clients automatically.
+        // Codec/parameter-set detection per AU: the HEVC VPS/SPS/PPS triple is
+        // only present in HEVC keyframes, the AVC SPS/PPS pair in H.264 ones.
+        // Whenever parameter sets change (codec flip, resolution, or
+        // orientation flip), update the cached config AND push a fresh
+        // LCCF/LCHC config frame ahead of the keyframe to connected clients so
+        // WebCodecs decoders reconfigure before decoding the new geometry.
+        val previousConfig = cachedVideoConfig
+        var configChanged = false
         val hevcSets = WsVideoProtocol.extractHevcParameterSets(raw)
         when {
-            hevcSets != null -> cachedVideoConfig =
-                CachedVideoConfig(isHevc = true, vps = hevcSets.vps, sps = hevcSets.sps, pps = hevcSets.pps)
+            hevcSets != null -> {
+                val next = CachedVideoConfig(isHevc = true, vps = hevcSets.vps, sps = hevcSets.sps, pps = hevcSets.pps)
+                if (previousConfig == null || !previousConfig.matches(next)) {
+                    cachedVideoConfig = next
+                    configChanged = previousConfig != null
+                }
+            }
             else -> WsVideoProtocol.extractParameterSets(raw)?.let { (sps, pps) ->
-                cachedVideoConfig = CachedVideoConfig(isHevc = false, vps = null, sps = sps, pps = pps)
+                val next = CachedVideoConfig(isHevc = false, vps = null, sps = sps, pps = pps)
+                if (previousConfig == null || !previousConfig.matches(next)) {
+                    cachedVideoConfig = next
+                    configChanged = previousConfig != null
+                }
             }
         }
         if (videoClients.isEmpty()) return
+        val configFrame = if (configChanged) {
+            cachedVideoConfig?.toConfigPayload()?.let {
+                WebSocketFrame(WebSocketFrame.OpCode.Binary, true, it)
+            }
+        } else {
+            null
+        }
         val isKey = WsVideoProtocol.containsKeyframe(nalUnits)
         val wsFrame = WebSocketFrame(
             WebSocketFrame.OpCode.Binary, true,
@@ -94,6 +129,9 @@ class WsMediaRoutes(
         val sendStartNanos = System.nanoTime()
         videoClients.forEach { client ->
             runCatching {
+                if (configFrame != null) {
+                    client.sendFrame(configFrame)
+                }
                 client.sendFrame(wsFrame)
                 sentBytes += wsFrame.binaryPayload?.size ?: 0
             }
@@ -166,14 +204,7 @@ class WsMediaRoutes(
             when (val config = cachedVideoConfig) {
                 null -> Unit // joined before the first keyframe: config follows the next AU
                 else -> runCatching {
-                    val payload =
-                        if (config.isHevc) {
-                            val vps = config.vps
-                            if (vps == null) return@runCatching
-                            WsVideoProtocol.hevcVideoConfig(vps, config.sps, config.pps)
-                        } else {
-                            WsVideoProtocol.videoConfig(config.sps, config.pps)
-                        }
+                    val payload = config.toConfigPayload() ?: return@runCatching
                     sendFrame(WebSocketFrame(WebSocketFrame.OpCode.Binary, true, payload))
                 }
             }

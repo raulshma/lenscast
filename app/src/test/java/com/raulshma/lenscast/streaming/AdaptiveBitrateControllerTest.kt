@@ -111,8 +111,8 @@ class AdaptiveBitrateControllerTest {
             monitor,
             AdaptiveBitrateController.AdaptiveBitrateConfig(defaultQuality = 80),
         )
-        controller.setDefaultFrameRate(120) // above maxFps=30
-        assertEquals(30, controller.state.value.targetFps)
+        controller.setDefaultFrameRate(120) // above maxFps=60
+        assertEquals(60, controller.state.value.targetFps)
         controller.setDefaultFrameRate(0)
         assertEquals(3, controller.state.value.targetFps)
     }

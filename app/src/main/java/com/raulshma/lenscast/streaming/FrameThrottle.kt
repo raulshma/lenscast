@@ -55,3 +55,58 @@ class FrameThrottle(
         const val TOLERANCE = 0.8f
     }
 }
+
+/**
+ * Phase-accumulating nanosecond frame pacer driven by monotonic camera capture
+ * timestamps (`ImageProxy.imageInfo.timestamp`, falling back to `System.nanoTime()`
+ * when callers pass `<= 0`).
+ *
+ * Compared to a greedy `elapsed >= interval * 0.8` throttle:
+ * - Down-paces cleanly to non-integer-divisor targets (e.g. 24 fps or 25 fps out
+ *   of a 30 fps camera) without leaking the full 30 fps stream.
+ * - Absorbs up to `min(interval / 4, MAX_JITTER_NS)` of early-frame jitter on
+ *   30/60 fps sensors without dropping frames or accumulating phase drift.
+ * - Clamps the next deadline when the sensor runs slower than target or after a
+ *   gap, so no catch-up burst ever fires later.
+ */
+class FramePacer(
+    private val intervalNs: () -> Long,
+) {
+    private var initialized = false
+    private var lastAcceptedNs = 0L
+    private var nextDueNs = 0L
+
+    /** Decides one frame at monotonic [timestampNs]. True = proceed with it. */
+    @Synchronized
+    fun accept(timestampNs: Long): Boolean {
+        val interval = intervalNs()
+        if (interval == Long.MAX_VALUE) return false
+        if (interval <= 0L) return true
+        if (timestampNs < 0L) return false
+
+        if (!initialized) {
+            initialized = true
+            lastAcceptedNs = timestampNs
+            nextDueNs = timestampNs + interval
+            return true
+        }
+
+        if (timestampNs < lastAcceptedNs) return false
+
+        val margin = minOf(interval / 4L, MAX_JITTER_NS)
+        // Capping against lastAcceptedNs + interval lets an upward fps switch
+        // (e.g. 15 -> 60 fps) land on the next frame instead of waiting out the
+        // old slow deadline.
+        val due = minOf(nextDueNs, lastAcceptedNs + interval)
+        if (timestampNs < due - margin) return false
+
+        lastAcceptedNs = timestampNs
+        val advanced = due + interval
+        nextDueNs = if (advanced < timestampNs) timestampNs + interval else advanced
+        return true
+    }
+
+    companion object {
+        const val MAX_JITTER_NS = 4_000_000L
+    }
+}

@@ -394,8 +394,8 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph, R
             enabled = { settingsDataStore.onvifEnabled.value },
             httpsEnabled = { settingsDataStore.httpsEnabled.value },
             rtspTlsEnabled = { settingsDataStore.rtspTlsEnabled.value },
-            videoWidth = { settingsDataStore.rtspResolution.value.width },
-            videoHeight = { settingsDataStore.rtspResolution.value.height },
+            videoWidth = { streamingManager.currentVideoWidth() },
+            videoHeight = { streamingManager.currentVideoHeight() },
             videoBitrate = { streamingManager.currentVideoBitrate() },
             videoFps = { settingsDataStore.settings.value.frameRate },
             videoCodec = { settingsDataStore.rtspVideoCodec.value },
@@ -897,8 +897,8 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph, R
      * composed (headless start via the Web API).
      */
     private fun wireFramePump() {
-        cameraService.setFrameListener { yuvData, width, height, rotation ->
-            streamingManager.pushFrame(yuvData, width, height, rotation)
+        cameraService.setTimestampedFrameListener { yuvData, width, height, rotation, timestampNs ->
+            streamingManager.pushFrame(yuvData, width, height, rotation, timestampNs)
         }
         // Detection events (motion + sound) dispatch through the coordinator:
         // schedule arming, bounded motion recording or the legacy auto-photo,

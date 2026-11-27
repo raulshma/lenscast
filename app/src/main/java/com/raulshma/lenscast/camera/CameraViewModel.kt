@@ -130,15 +130,6 @@ class CameraViewModel(
 
     override val isRecording: StateFlow<Boolean> = recordingController.isRecording
 
-    // One shared editor for camera-control writes: persist only — the
-    // Settings Applier applies each persisted write exactly once (the
-    // apply-then-persist dual write would land the pre-convergence torch
-    // pair after the converged one; see CameraSettingsEditor).
-    private val settingsEditor = CameraSettingsEditor(
-        current = { settings.value },
-        persist = { settingsDataStore.saveSettings(it) },
-    )
-
     // One shared clock over the controller's state (1s ticks, whole seconds).
     private val recordingClock = com.raulshma.lenscast.capture.RecordingClock(
         recordingState = recordingController.state,
@@ -397,9 +388,6 @@ class CameraViewModel(
             proToolsFrameAnalyzer.onFrame(nv21, width, height, rotation, System.currentTimeMillis())
         }
         spiritLevelMonitor.setPreviewActive(true)
-        viewModelScope.launch {
-            cameraService.applySettings(settings.value)
-        }
     }
 
     override fun stopPreview() {
@@ -450,7 +438,12 @@ class CameraViewModel(
 
     private fun updateSettings(transform: (CameraSettings) -> CameraSettings) {
         viewModelScope.launch {
-            settingsEditor.edit(transform)
+            // Atomic field-level edit against disk truth (issue #25 / default-first
+            // race): avoids clobbering concurrent writes (e.g. converged torch
+            // or web zoom) with a lagging StateFlow snapshot.
+            settingsDataStore.updateCameraSettings { current ->
+                CameraSettingsEditor.normalizeManualDefaults(transform(current))
+            }
         }
     }
 

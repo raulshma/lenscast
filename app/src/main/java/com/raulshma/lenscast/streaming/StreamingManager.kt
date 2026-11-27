@@ -40,9 +40,11 @@ import com.raulshma.lenscast.streaming.rtsp.RtspVideoCodec
 import com.raulshma.lenscast.streaming.rtsp.rtspAuthSpecFromPrefs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -313,6 +315,63 @@ class StreamingManager(
     private val adaptiveBitrateController = AdaptiveBitrateController(networkQualityMonitor)
     private val qualityPolicy = StreamQualityPolicy(thermalMonitor, adaptiveBitrateController)
     private val framePipeline = FramePipeline(qualityPolicy)
+
+    private class TapFrame(
+        val yuvData: ByteArray,
+        val width: Int,
+        val height: Int,
+        val rotation: Int,
+        val timestampNs: Long,
+    )
+
+    /**
+     * Conflated single-lane worker so CPU-heavy YUV rotation, scaling, overlay,
+     * and encoding never stall CameraService's single FrameAnalysis thread and
+     * drop incoming ImageProxies under STRATEGY_KEEP_ONLY_LATEST.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private inner class ConflatedFrameLane(
+        private val name: String,
+        private val consumer: (TapFrame) -> Unit,
+    ) {
+        private val queue = Channel<TapFrame>(capacity = Channel.CONFLATED)
+
+        init {
+            monitorScope.launch(Dispatchers.Default.limitedParallelism(1)) {
+                for (frame in queue) {
+                    try {
+                        consumer(frame)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "$name frame lane error", e)
+                    }
+                }
+            }
+        }
+
+        fun offer(yuvData: ByteArray, width: Int, height: Int, rotation: Int, timestampNs: Long) {
+            queue.trySend(TapFrame(yuvData, width, height, rotation, timestampNs))
+        }
+
+        fun close() {
+            queue.close()
+        }
+    }
+
+    private val encodedFrameLane by lazy {
+        ConflatedFrameLane("encoded") { frame ->
+            encodedHub.pushFrame(frame.yuvData, frame.width, frame.height, frame.rotation, frame.timestampNs)
+        }
+    }
+    private val whipFrameLane by lazy {
+        ConflatedFrameLane("whip") { frame ->
+            whipOutput.feedVideoFrame(frame.yuvData, frame.width, frame.height, frame.rotation, frame.timestampNs)
+        }
+    }
+    private val whepFrameLane by lazy {
+        ConflatedFrameLane("whep") { frame ->
+            whepServer.feedVideoFrame(frame.yuvData, frame.width, frame.height, frame.rotation, frame.timestampNs)
+        }
+    }
     // The manager's Web API stack, assembled by the injected app-tier
     // builder ([webApiStackFactory]) — built once, at the first request
     // (today the transport's eager initial server build), with the manager
@@ -1614,7 +1673,7 @@ class StreamingManager(
      * raw sensor frames — the motion zones are defined on the sensor view,
      * and rotating them upstream would shift their semantics.
      */
-    fun pushFrame(yuvData: ByteArray, width: Int, height: Int, rotation: Int = 0) {
+    fun pushFrame(yuvData: ByteArray, width: Int, height: Int, rotation: Int = 0, timestampNs: Long = 0L) {
         // The viewer-independent camera-frame counter — the watchdog's
         // headless stall signal. Counted at entry, before the thermal
         // early-return: a thermally-paused stream is a controlled state, not
@@ -1640,15 +1699,16 @@ class StreamingManager(
             motionDetector.feed(yuvData, width, height)
         } catch (_: Exception) {
         }
-        pushFrameToWeb(yuvData, width, height, outputRotation)
-        encodedHub.pushFrame(yuvData, width, height, outputRotation)
-        // The WHIP publisher taps the same NV21 analysis frame (it encodes its
-        // own H.264 from it) and no-ops internally while stopped.
-        whipOutput.feedVideoFrame(yuvData, width, height, outputRotation)
-        // The WHEP endpoint taps it too — one shared libwebrtc VideoSource
-        // fans the frame to every viewer's hardware encoder. No-ops with no
-        // viewers.
-        whepServer.feedVideoFrame(yuvData, width, height, outputRotation)
+        pushFrameToWeb(yuvData, width, height, outputRotation, timestampNs)
+        encodedFrameLane.offer(yuvData, width, height, outputRotation, timestampNs)
+        // The WHIP/WHEP taps run off FrameAnalysis on their own conflated lanes
+        // and only enqueue while active/viewed.
+        if (whipOutput.isActive()) {
+            whipFrameLane.offer(yuvData, width, height, outputRotation, timestampNs)
+        }
+        if (whepServer.sessionCount() > 0) {
+            whepFrameLane.offer(yuvData, width, height, outputRotation, timestampNs)
+        }
     }
 
     /**
@@ -1659,14 +1719,24 @@ class StreamingManager(
      * rotation parameter).
      */
     fun setOutputRotation(degrees: Int, locked: Boolean) {
-        outputRotationDegrees = OutputRotationPolicy.coerce(degrees)
+        val coerced = OutputRotationPolicy.coerce(degrees)
+        outputRotationDegrees = coerced
         orientationLocked = locked
+        if (locked) {
+            encodedHub.setOrientationHint(coerced)
+        }
     }
 
     @Volatile private var outputRotationDegrees = 0
     @Volatile private var orientationLocked = false
 
-    private fun pushFrameToWeb(yuvData: ByteArray, width: Int, height: Int, rotation: Int) {
+    private fun pushFrameToWeb(
+        yuvData: ByteArray,
+        width: Int,
+        height: Int,
+        rotation: Int,
+        timestampNs: Long,
+    ) {
         if (!webStreamingActive.get()) return
 
         val clientCount = webTransport.clientCount()
@@ -1683,7 +1753,7 @@ class StreamingManager(
         }
         if (clientCount == 0) return
 
-        framePipeline.push(yuvData, width, height, rotation, currentOverlaySettings, clientCount)
+        framePipeline.push(yuvData, width, height, rotation, currentOverlaySettings, clientCount, timestampNs)
     }
 
     fun setJpegQuality(quality: Int) {
@@ -1975,6 +2045,12 @@ class StreamingManager(
     /** The encoded pipeline's live target bitrate — the adaptive controller's current value, not the static default. */
     fun currentVideoBitrate(): Int = encodedHub.currentVideoBitrate()
 
+    /** The active oriented encode width (swapped in portrait, matching the upright frame). */
+    fun currentVideoWidth(): Int = encodedHub.currentVideoWidth()
+
+    /** The active oriented encode height (swapped in portrait, matching the upright frame). */
+    fun currentVideoHeight(): Int = encodedHub.currentVideoHeight()
+
     /** The encoded lane's measured-stream status — StatusWebHandler projects it onto its /api/status inputs (issue #25). */
     internal fun encodedStreamStatus(): EncodedStreamHub.EncodedStreamStatus = encodedHub.encodedStreamStatus()
 
@@ -2179,6 +2255,9 @@ class StreamingManager(
 
     fun release() {
         framePipeline.release()
+        encodedFrameLane.close()
+        whipFrameLane.close()
+        whepFrameLane.close()
         encodedHub.stop()
         audioStreamingManager.release()
         stopStreaming()

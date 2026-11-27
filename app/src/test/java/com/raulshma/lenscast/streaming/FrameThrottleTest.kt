@@ -1,5 +1,6 @@
 package com.raulshma.lenscast.streaming
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -126,5 +127,57 @@ class FrameThrottleTest {
         // so the next nominal frame at +16 ms (1_030) still passes!
         assertFalse(throttle.accept(1_022))
         assertTrue(throttle.accept(1_030))
+    }
+
+    // ── FramePacer: phase-accumulating nanosecond pacing ──
+
+    private fun countAcceptedOverSecond(targetFps: Int, cameraFps: Int, jitterNs: Long = 0L): Int {
+        val pacer = FramePacer { FrameTiming.frameIntervalNs(targetFps) }
+        val periodNs = 1_000_000_000L / cameraFps
+        var accepted = 0
+        for (i in 0 until cameraFps) {
+            val offset = if (jitterNs == 0L) 0L else if (i % 2 == 0) -jitterNs else jitterNs
+            val ts = 10_000_000_000L + i * periodNs + offset
+            if (pacer.accept(ts)) accepted++
+        }
+        return accepted
+    }
+
+    @Test
+    fun `FramePacer hits exact 24 and 25 fps out of a 30 fps camera`() {
+        assertEquals(24, countAcceptedOverSecond(targetFps = 24, cameraFps = 30))
+        assertEquals(25, countAcceptedOverSecond(targetFps = 25, cameraFps = 30))
+        assertEquals(24, countAcceptedOverSecond(targetFps = 24, cameraFps = 30, jitterNs = 2_000_000L))
+        assertEquals(25, countAcceptedOverSecond(targetFps = 25, cameraFps = 30, jitterNs = 2_000_000L))
+    }
+
+    @Test
+    fun `FramePacer hits 30 and 60 fps without dropping frames under 2ms camera jitter`() {
+        assertEquals(30, countAcceptedOverSecond(targetFps = 30, cameraFps = 30, jitterNs = 2_000_000L))
+        assertEquals(60, countAcceptedOverSecond(targetFps = 60, cameraFps = 60, jitterNs = 2_000_000L))
+    }
+
+    @Test
+    fun `FramePacer clamps deadline on slow camera so a later speedup does not burst`() {
+        var intervalNs = FrameTiming.frameIntervalNs(60)
+        val pacer = FramePacer { intervalNs }
+        // Camera delivers slowly at 30 fps (33.3 ms) for 10 frames while target is 60 fps.
+        var ts = 1_000_000_000L
+        repeat(10) {
+            assertTrue(pacer.accept(ts))
+            ts += 33_333_333L
+        }
+        // Camera speeds up: a frame only 5 ms later must still be rejected (no accumulated burst debt).
+        assertFalse(pacer.accept(ts - 33_333_333L + 5_000_000L))
+    }
+
+    @Test
+    fun `FramePacer switches upward from 15 fps to 60 fps immediately`() {
+        var intervalNs = FrameTiming.frameIntervalNs(15)
+        val pacer = FramePacer { intervalNs }
+        assertTrue(pacer.accept(1_000_000_000L))
+        intervalNs = FrameTiming.frameIntervalNs(60)
+        // 17 ms after the 15 fps frame, the 60 fps target is already due.
+        assertTrue(pacer.accept(1_017_000_000L))
     }
 }

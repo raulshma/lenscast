@@ -106,6 +106,16 @@ describe('NextShell — the TX/FPS chips', () => {
     expect(streamChips()).toEqual([])
   })
 
+  it('caps the chip at two decimals — a window-measured fps prints clean', () => {
+    const fractional = {
+      ...adaptiveOn,
+      connectionQuality: { ...allLanes.connectionQuality, framesPerSecond: 23.416666666666668 },
+    }
+    const { setPlayerMode } = renderShell(live(fractional))
+    setPlayerMode('mjpeg')
+    expect(streamChips()).toEqual(['TX 3.9M', '23.42FPS'])
+  })
+
   it('on shows the lane without Adaptive Bitrate and while the stream is down; off hides', () => {
     const overlay = streamStatsOverlayStore()
     const down = { streaming: { isActive: false }, ...allLanes }

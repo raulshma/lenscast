@@ -60,6 +60,7 @@ export default function InspectorPanelFrame(props: Props) {
                   : t('next.inspector.section.collapse', { title: title() })}
                 size="sm"
                 variant="ghost"
+                tooltipEdge="right"
                 ariaExpanded={!props.section().collapsed}
                 disabled={props.readOnly() || !props.onToggleCollapsed}
                 onClick={props.onToggleCollapsed}
@@ -71,6 +72,7 @@ export default function InspectorPanelFrame(props: Props) {
                   label={t('next.inspector.section.hide', { title: title() })}
                   size="sm"
                   variant="ghost"
+                  tooltipEdge="right"
                   disabled={props.readOnly()}
                   onClick={props.onHide}
                 >

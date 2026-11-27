@@ -50,6 +50,31 @@ describe('InspectorPanelFrame', () => {
     expect(onHide).toHaveBeenCalledTimes(1)
   })
 
+  it('anchors the header bubbles right so the column edge cannot clip them', () => {
+    // The collapse/hide pair pins to every section header's right edge,
+    // and the column clips horizontally — a centered bubble
+    // ("Collapse {title}" can be long) would lose its far side.
+    const section = {
+      ...defaultInspectorLayout().sections[2],
+      customTitle: 'Live channels',
+    }
+    const { container } = render(() => (
+      <InspectorPanelFrame
+        section={() => section}
+        readOnly={() => false}
+        onToggleCollapsed={vi.fn()}
+        onHide={vi.fn()}
+      >
+        <Panel title="Original title"><span>Body</span></Panel>
+      </InspectorPanelFrame>
+    ))
+    const bubbles = [...container.querySelectorAll('.nx-inspector-frame-actions [data-tooltip]')]
+    expect(bubbles).toHaveLength(2)
+    for (const el of bubbles) {
+      expect(el.getAttribute('data-tooltip-edge')).toBe('right')
+    }
+  })
+
   it('shows the empty state when every registered item is hidden', () => {
     const section = {
       ...defaultInspectorLayout().sections[0],

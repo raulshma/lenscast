@@ -1226,6 +1226,29 @@ describe('LiveView — configurable inspector', () => {
     // The shiftable saving indicator is gone for good, everywhere.
     expect(css).not.toContain('nx-inspector-saving')
   })
+
+  it('narrow columns stack field rows but never toggles or diagnostics rows, as written in layout.css', () => {
+    const css = readFileSync(resolve(process.cwd(), 'src/styles/next/layout.css'), 'utf8')
+    const block = css.match(/@container \(max-width: 380px\) \{[\s\S]*?\n\}/)?.[0] ?? ''
+    expect(block).not.toBe('')
+    // The stacking rule answers the narrow column; without the exemptions a
+    // switch stretches into a full-width pill and a diagnostics reading
+    // drifts mid-row on its right-aligned 60% box. The switch's exemption
+    // pins the concrete 44px: `width: auto` would out-rank the kit's 44px
+    // and size the label to its content — nothing, since input, track and
+    // thumb are all absolutely positioned — collapsing the toggle out of
+    // sight (the vanished right-column controls at preset widths).
+    expect(block).toMatch(
+      /\[data-ui='next'\] \.nx-inspector \.nx-field-row:has\(> \.nx-switch\),\n  \[data-ui='next'\] \.nx-inspector \.nx-info-panel \.nx-field-row \{\n    align-items: center;\n    flex-direction: row;\n  \}/,
+    )
+    expect(block).toMatch(
+      /\[data-ui='next'\] \.nx-inspector \.nx-field-row:has\(> \.nx-switch\) > \.nx-switch \{\n    width: 44px;\n  \}/,
+    )
+    expect(block).toMatch(
+      /\[data-ui='next'\] \.nx-inspector \.nx-info-panel \.nx-field-row > \.nx-info-value \{\n    width: auto;\n  \}/,
+    )
+    expect(block).not.toMatch(/nx-switch[^{}]*\{\n    width: auto;/)
+  })
 })
 
 describe('LiveView — hiding a section asks first', () => {

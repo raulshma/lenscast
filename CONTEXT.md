@@ -428,7 +428,13 @@ encode separately but each owns a compositor fed by the same current settings.
 Masking never mutates the camera's own analysis array — when the target aliases
 it, the compositor paints into a per-size reusable copy, because the MJPEG
 pipeline and the WHIP/WHEP taps still read that array after the fan-out. The
-sub-stream scales the ROTATED frame, not the
+encode dimensions (main and `/sub`) also follow the frame's upright orientation
+through the Encoded Orientation Policy: `90°`/`270°` frames swap the landscape
+tier (`1280×720` → `720×1280`, `/sub` `640×480` → `480×640`) and reconfigure the
+encoders rather than aspect-fill center-cropping portrait into landscape; an
+orientation or parameter-set change notifies `HlsVideoSink.onStreamReconfigured`
+(marking `#EXT-X-DISCONTINUITY`) and re-emits `LCCF`/`LCHC` config frames on
+`/ws/video`. The sub-stream scales the ROTATED frame, not the
 possibly re-scaled main frame: its dimensions move under `frameData`, and
 feeding the sub scale the stale source dims corrupted `/sub` whenever the
 encode resolution differed from the analysis resolution. The encoder
@@ -439,6 +445,15 @@ fan-out records every AU's (timestamp, bytes) into the encoded lane's
 encoder output's measured bitrate/fps from it (see Stream Stats) — so
 `/api/status`'s `encodedStream` block is what the encoder produced, not
 what it was configured to produce.
+
+### Encoded Orientation Policy
+**`streaming/EncodedOrientationPolicy.kt`** — the pure orientation mapper
+behind the Encoded Stream Hub: `isPortraitRotation(rotation)` detects `90°` and
+`270°` quarter-turns (normalized across negative/wrapped angles) and
+`orientedDimensions(tierWidth, tierHeight, rotation)` swaps landscape tiers to
+portrait (`720×1280`, `480×640`) so the encoded outputs (RTSP, HLS, `/ws/video`,
+RTMP, SRT) preserve the same upright full field of view as MJPEG, WHEP, WHIP,
+and snapshots.
 
 ### H264 Stream Assembler
 **`streaming/rtsp/H264StreamAssembler.kt`** — the wire-format core of the
@@ -1908,7 +1923,11 @@ pass sees what the hand sees. The accessible name still comes from the
 `aria-label` the call site pairs with it. `data-tooltip-edge="below|left|right"`
 re-anchors the bubble where centered-above would clip — `below` for hosts at a
 clipping container's top (PiP chrome row, inspector column toggle, fullscreen
-exit), `left`/`right` for bar-end keys. The kit's `Button`/`IconButton`
+exit), `left` for the preview bar's two start keys (player mode and the
+stats toggle, which carries the bar's longest bubble and clips in a narrow
+frame), `right` for the inspector section header's collapse/hide pair —
+the rightmost hosts in a column that clips horizontally — and the preview
+bar's trailing key. The kit's `Button`/`IconButton`
 carry it through `tooltip`/`tooltipEdge` (`IconButton` defaults the bubble to
 its required `label`); the kit never emits a native `title`. Native `title`
 survives only where a bubble physically cannot render: the language
@@ -3151,6 +3170,22 @@ torchState observation plus the strength it last drove; the pure
 `TorchState.from` mapping keeps the machine JVM-testable, and
 `isTorchOn()` derives from the same flow. The automation side's
 LIVE/PERSISTED split (see Torch (LIVE vs PERSISTED)) rides this line.
+
+### Torch Convergence Policy
+**`camera/model/TorchConvergencePolicy.kt`** — the pure convergence and
+rebind control-target verdicts behind `CameraService.applySettings`,
+`setTorchEnabled`, and `applyCameraControls`:
+- `resolveApply` decides whether an incoming `CameraSettings` apply touched
+  the torch pair (`torchEnabled`/`torchStrength`, cold start, or an explicit
+  `torchIntent`) and, when untouched, preserves `liveTorchOverride` or skips
+  dark-side convergence while no camera is bound, while a bind settle window
+  (`torchSettlePending`, cleared only by a `forceFocusReapply = true`
+  post-bind rung / `OPEN` edge or an observed `ON`) is open, or while an
+  async hardware drive (`pendingHardwareTorchTarget`) is still in flight.
+- `resolveControlTarget` lets live-only `setTorchEnabled` flips survive
+  camera rebinds (stream start/stop, recovery, lens/resolution/FPS changes)
+  at device-default brightness (`strength = null`), while clearing the
+  override on explicit persisted torch writes or full session unbind.
 
 ### Rule Vocabulary
 **`automation/schedule/AutomationRuleEnums.kt`** — the typed forms of the

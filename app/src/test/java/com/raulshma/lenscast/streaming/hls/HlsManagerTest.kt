@@ -225,4 +225,27 @@ class HlsManagerTest {
         HlsManager.noteRequest()
         assertFalse(HlsManager.isHot())
     }
+
+    @Test
+    fun `stream reconfigured closes open segment immediately and marks next segment discontinuous`() {
+        // Feed 0.4s (< MIN_SEGMENT_PTS = 1s) of pre-reconfig frames.
+        repeat(10) {
+            HlsManager.feedVideo(listOf(videoFrame()))
+            nowMs += 40L
+        }
+        assertFalse(HlsManager.hasSegments())
+
+        // Orientation/resolution flip triggers onStreamReconfigured(); the next
+        // keyframe closes the short pre-flip segment immediately and tags the
+        // post-flip segment with #EXT-X-DISCONTINUITY.
+        HlsManager.onStreamReconfigured()
+        HlsManager.feedVideo(listOf(videoFrame()))
+        nowMs += 40L
+        assertEquals(1, countSegments())
+
+        // Feed enough post-reconfig frames to close the second segment too.
+        feedSecondsOfVideo(framesPerSecond = 25, seconds = 2)
+        val playlist = HlsManager.playlist()
+        assertTrue(playlist.contains("#EXT-X-DISCONTINUITY"))
+    }
 }

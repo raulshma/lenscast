@@ -274,20 +274,29 @@ data class CameraControlPlan(
             return if (reaching.isNotEmpty()) {
                 val minUpper = reaching.minOf { it.upper }
                 val atMinUpper = reaching.filter { it.upper == minUpper }
-                pickPreferredLower(atMinUpper, fpsLower) to false
+                pickPreferredLower(atMinUpper, fpsLower, fpsUpper) to false
             } else {
                 val maxUpper = available.maxOf { it.upper }
                 val atMaxUpper = available.filter { it.upper == maxUpper }
-                pickPreferredLower(atMaxUpper, fpsLower) to true
+                pickPreferredLower(atMaxUpper, fpsLower, fpsUpper) to true
             }
         }
 
         private fun pickPreferredLower(
             candidates: List<CaptureSupport.FpsRange>,
             fpsLower: Int,
-        ): CaptureSupport.FpsRange =
-            candidates.filter { it.lower <= fpsLower }.maxByOrNull { it.lower }
+            fpsUpper: Int,
+        ): CaptureSupport.FpsRange {
+            if (fpsLower == fpsUpper) {
+                // Fixed-rate user target (e.g. 24 or 25 fps): prefer a range
+                // whose floor is at or above the target (e.g. [30, 30] over
+                // [7, 30]) so indoor AE stays locked >= target for FramePacer
+                // rather than free-running down to 7–13 fps.
+                candidates.filter { it.lower >= fpsLower }.minByOrNull { it.lower }?.let { return it }
+            }
+            return candidates.filter { it.lower <= fpsLower }.maxByOrNull { it.lower }
                 ?: candidates.minBy { it.lower }
+        }
 
         /**
          * The plan in two stages: what the settings ask for ([requested]),

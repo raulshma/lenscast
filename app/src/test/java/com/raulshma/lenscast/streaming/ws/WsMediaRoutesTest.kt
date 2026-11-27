@@ -3,6 +3,7 @@ package com.raulshma.lenscast.streaming.ws
 import com.raulshma.lenscast.core.StreamAuthCrypto
 import com.raulshma.lenscast.streaming.AudioStreamingManager
 import com.raulshma.lenscast.streaming.WebAuthGate
+import com.raulshma.lenscast.streaming.rtsp.EncodedNalUnit
 import fi.iki.elonen.NanoHTTPD.IHTTPSession
 import fi.iki.elonen.NanoWSD
 import fi.iki.elonen.NanoWSD.WebSocket
@@ -13,9 +14,12 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.io.BufferedInputStream
 import java.io.BufferedReader
+import java.io.DataInputStream
 import java.io.InputStreamReader
 import java.net.Socket
+import java.nio.charset.StandardCharsets
 
 /**
  * Socket-level handshake pass over [WsMediaRoutes] — the same-origin
@@ -148,5 +152,92 @@ class WsMediaRoutesTest {
             extraHeaders = mapOf("Cookie" to "${WebAuthGate.COOKIE_NAME}=forged-token-value"),
         )
         assertFalse("a forged cookie must never upgrade: ${response.statusLine}", response.upgraded)
+    }
+
+    @Test
+    fun `parameter set change pushes a fresh LCCF config before the new keyframe`() {
+        val spsLandscape = byteArrayOf(0x67, 0x64, 0x00, 0x1F, 0x01)
+        val spsPortrait = byteArrayOf(0x67, 0x64, 0x00, 0x1F, 0x02)
+        val pps = byteArrayOf(0x68, 0xEB.toByte(), 0xEC.toByte())
+        val idr = byteArrayOf(0x65, 0x88.toByte(), 0x84.toByte())
+
+        // Seed initial landscape config before the client connects.
+        routes.feedVideo(
+            listOf(
+                EncodedNalUnit(spsLandscape, false),
+                EncodedNalUnit(pps, false),
+                EncodedNalUnit(idr, true),
+            ),
+        )
+
+        Socket("127.0.0.1", port).use { socket ->
+            socket.soTimeout = 5_000
+            val req = buildString {
+                append("GET /ws/video HTTP/1.1\r\n")
+                append("Host: 127.0.0.1:$port\r\n")
+                append("Upgrade: websocket\r\n")
+                append("Connection: Upgrade\r\n")
+                append("Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n")
+                append("Sec-WebSocket-Version: 13\r\n")
+                append("\r\n")
+            }
+            socket.getOutputStream().write(req.toByteArray(Charsets.US_ASCII))
+            socket.getOutputStream().flush()
+
+            val input = BufferedInputStream(socket.getInputStream())
+            val statusAndHeaders = readHttpHeaders(input)
+            assertTrue(statusAndHeaders.contains(" 101 "))
+
+            // Initial cached LCCF sent on open.
+            val firstPayload = readNextBinaryWsPayload(input)
+            assertEquals("LCCF", String(firstPayload, 0, 4, StandardCharsets.US_ASCII))
+
+            // Orientation flip emits new SPS/PPS: connected client must receive
+            // a fresh LCCF before the LCK1 keyframe.
+            routes.feedVideo(
+                listOf(
+                    EncodedNalUnit(spsPortrait, false),
+                    EncodedNalUnit(pps, false),
+                    EncodedNalUnit(idr, true),
+                ),
+            )
+            val updatedConfigPayload = readNextBinaryWsPayload(input)
+            assertEquals("LCCF", String(updatedConfigPayload, 0, 4, StandardCharsets.US_ASCII))
+            val keyframePayload = readNextBinaryWsPayload(input)
+            assertEquals("LCK1", String(keyframePayload, 0, 4, StandardCharsets.US_ASCII))
+        }
+    }
+
+    private fun readHttpHeaders(input: BufferedInputStream): String {
+        val sb = StringBuilder()
+        while (true) {
+            val b = input.read()
+            if (b < 0) break
+            sb.append(b.toChar())
+            if (sb.endsWith("\r\n\r\n")) break
+        }
+        return sb.toString()
+    }
+
+    private fun readNextBinaryWsPayload(input: BufferedInputStream): ByteArray {
+        val data = DataInputStream(input)
+        while (true) {
+            val b0 = data.readUnsignedByte()
+            val b1 = data.readUnsignedByte()
+            val opcode = b0 and 0x0F
+            var len = b1 and 0x7F
+            if (len == 126) {
+                len = data.readUnsignedShort()
+            } else if (len == 127) {
+                len = data.readLong().toInt()
+            }
+            val payload = ByteArray(len)
+            data.readFully(payload)
+            if (opcode == 0x2) return payload
+            if (opcode == 0x9) {
+                // Ignore server keepalive pings if any arrive.
+                continue
+            }
+        }
     }
 }

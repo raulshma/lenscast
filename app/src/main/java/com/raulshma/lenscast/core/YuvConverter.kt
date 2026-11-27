@@ -30,9 +30,12 @@ object YuvConverter {
         val uvSize = ySize / 2
         val nv21 = ByteArray(ySize + uvSize)
 
-        // Copy Y plane — use bulk get when pixelStride==1 for ~4x speedup
+        // Copy Y plane — single bulk transfer when unpadded/uncropped, row bulk when pixelStride==1
         val y = yBuffer.duplicate()
-        if (yPixelStride == 1) {
+        if (yPixelStride == 1 && yRowStride == width && cropLeft == 0 && cropTop == 0) {
+            y.position(0)
+            y.get(nv21, 0, ySize)
+        } else if (yPixelStride == 1) {
             var yOut = 0
             for (row in 0 until height) {
                 y.position((row + cropTop) * yRowStride + cropLeft)
@@ -59,23 +62,61 @@ object YuvConverter {
         val uvCropLeft = cropLeft / 2
         var uvPos = ySize
 
-        // Fast path: interleaved NV12/NV21 with pixelStride==2 and contiguous VU layout
+        // Fast path: interleaved NV21/NV12 with pixelStride==2 and equal rowStride
         if (vPixelStride == 2 && uPixelStride == 2 && vRowStride == uRowStride
             && v.capacity() > 0
         ) {
             val vStart = vBuffer.position()
             val uStart = uBuffer.position()
-            // NV21: VU interleaved, V plane starts 1 byte before U
-            if (uStart - vStart == 1) {
-                // The raw buffer IS NV21 interleaved — bulk copy per row
+            // NV21: VU interleaved, V plane starts 1 byte before U in same backing view
+            if (uStart - vStart == 1 && vStart == 0) {
+                if (vRowStride == width && cropLeft == 0 && cropTop == 0 && v.limit() >= uvSize) {
+                    v.position(0)
+                    v.get(nv21, ySize, uvSize)
+                } else {
+                    for (row in 0 until uvHeight) {
+                        val rowOffset = (row + uvCropTop) * vRowStride + uvCropLeft * vPixelStride
+                        v.position(rowOffset)
+                        v.get(nv21, uvPos, uvWidth * 2)
+                        uvPos += uvWidth * 2
+                    }
+                }
+            } else if (vStart - uStart == 1 && uStart == 0) {
+                // NV12 interleaved (UV) in same backing view: bulk-copy row, swap UV→VU
+                val rowBytes = uvWidth * 2
+                val rowBuf = ByteArray(rowBytes)
                 for (row in 0 until uvHeight) {
-                    val rowOffset = (row + uvCropTop) * vRowStride + uvCropLeft * vPixelStride
+                    val rowOffset = (row + uvCropTop) * uRowStride + uvCropLeft * uPixelStride
+                    u.position(rowOffset)
+                    u.get(rowBuf, 0, rowBytes)
+                    var col = 0
+                    while (col < rowBytes) {
+                        nv21[uvPos++] = rowBuf[col + 1] // V
+                        nv21[uvPos++] = rowBuf[col]     // U
+                        col += 2
+                    }
+                }
+            } else if (vStart == 0 && uStart == 0 && uvWidth > 0) {
+                // Separate DirectByteBuffers (real Camera2 ImageProxy): bulk-copy one row
+                // per plane (uvHeight calls instead of uvWidth*uvHeight*2 single-byte JNI gets).
+                val span = uvWidth * 2 - 1
+                val vRowBuf = ByteArray(span)
+                val uRowBuf = ByteArray(span)
+                for (row in 0 until uvHeight) {
+                    val rowOffset = (row + uvCropTop) * vRowStride + uvCropLeft * 2
                     v.position(rowOffset)
-                    v.get(nv21, uvPos, uvWidth * 2)
-                    uvPos += uvWidth * 2
+                    v.get(vRowBuf, 0, span)
+                    u.position(rowOffset)
+                    u.get(uRowBuf, 0, span)
+                    var col = 0
+                    while (col < span) {
+                        nv21[uvPos++] = vRowBuf[col]
+                        nv21[uvPos++] = uRowBuf[col]
+                        col += 2
+                    }
                 }
             } else {
-                // Per-pixel interleave
+                // Per-pixel fallback for offset views with non-contiguous layout
                 for (row in 0 until uvHeight) {
                     var uIndex = (row + uvCropTop) * uRowStride + uvCropLeft * uPixelStride
                     var vIndex = (row + uvCropTop) * vRowStride + uvCropLeft * vPixelStride
@@ -87,14 +128,112 @@ object YuvConverter {
                     }
                 }
             }
+        } else if (uPixelStride == 1 && vPixelStride == 1 &&
+            uBuffer.position() == 0 && vBuffer.position() == 0
+        ) {
+            // Planar YU12/YV12 fast path: bulk-copy one U row + one V row per chroma row
+            val uRowBuf = ByteArray(uvWidth)
+            val vRowBuf = ByteArray(uvWidth)
+            for (row in 0 until uvHeight) {
+                u.position((row + uvCropTop) * uRowStride + uvCropLeft)
+                u.get(uRowBuf, 0, uvWidth)
+                v.position((row + uvCropTop) * vRowStride + uvCropLeft)
+                v.get(vRowBuf, 0, uvWidth)
+                for (col in 0 until uvWidth) {
+                    nv21[uvPos++] = vRowBuf[col]
+                    nv21[uvPos++] = uRowBuf[col]
+                }
+            }
         } else {
-            // Generic slow path (planar or odd strides)
+            // Generic slow path (odd strides)
             for (row in 0 until uvHeight) {
                 var uIndex = (row + uvCropTop) * uRowStride + uvCropLeft * uPixelStride
                 var vIndex = (row + uvCropTop) * vRowStride + uvCropLeft * vPixelStride
                 for (col in 0 until uvWidth) {
                     nv21[uvPos++] = v.get(vIndex)
                     nv21[uvPos++] = u.get(uIndex)
+                    uIndex += uPixelStride
+                    vIndex += vPixelStride
+                }
+            }
+        }
+
+        return nv21
+    }
+
+    /**
+     * Converts pre-copied cropped plane byte arrays (already anchored at crop
+     * origin `(0, 0)`) into packed NV21 purely in JVM array space without
+     * touching DirectByteBuffers. Used by CameraService's async converter
+     * stage after closing ImageProxy.
+     */
+    fun rawPlanesToNv21(
+        yBytes: ByteArray,
+        uBytes: ByteArray,
+        vBytes: ByteArray,
+        yRowStride: Int,
+        yPixelStride: Int,
+        uRowStride: Int,
+        uPixelStride: Int,
+        vRowStride: Int,
+        vPixelStride: Int,
+        width: Int,
+        height: Int,
+    ): ByteArray? {
+        if (width <= 0 || height <= 0) return null
+
+        val ySize = width * height
+        val uvSize = ySize / 2
+        val nv21 = ByteArray(ySize + uvSize)
+
+        if (yPixelStride == 1 && yRowStride == width) {
+            System.arraycopy(yBytes, 0, nv21, 0, ySize)
+        } else if (yPixelStride == 1) {
+            var yOut = 0
+            for (row in 0 until height) {
+                System.arraycopy(yBytes, row * yRowStride, nv21, yOut, width)
+                yOut += width
+            }
+        } else {
+            var yOut = 0
+            for (row in 0 until height) {
+                var srcIndex = row * yRowStride
+                for (col in 0 until width) {
+                    nv21[yOut++] = yBytes[srcIndex]
+                    srcIndex += yPixelStride
+                }
+            }
+        }
+
+        val uvWidth = width / 2
+        val uvHeight = height / 2
+        var uvPos = ySize
+
+        if (vPixelStride == 2 && uPixelStride == 2 && vRowStride == uRowStride) {
+            for (row in 0 until uvHeight) {
+                var idx = row * vRowStride
+                for (col in 0 until uvWidth) {
+                    nv21[uvPos++] = vBytes[idx]
+                    nv21[uvPos++] = uBytes[idx]
+                    idx += 2
+                }
+            }
+        } else if (uPixelStride == 1 && vPixelStride == 1) {
+            for (row in 0 until uvHeight) {
+                val uRow = row * uRowStride
+                val vRow = row * vRowStride
+                for (col in 0 until uvWidth) {
+                    nv21[uvPos++] = vBytes[vRow + col]
+                    nv21[uvPos++] = uBytes[uRow + col]
+                }
+            }
+        } else {
+            for (row in 0 until uvHeight) {
+                var uIndex = row * uRowStride
+                var vIndex = row * vRowStride
+                for (col in 0 until uvWidth) {
+                    nv21[uvPos++] = vBytes[vIndex]
+                    nv21[uvPos++] = uBytes[uIndex]
                     uIndex += uPixelStride
                     vIndex += vPixelStride
                 }
@@ -254,23 +393,160 @@ object YuvConverter {
     }
 
     /**
+     * Single-pass NV21 rotation + aspect-fill rescale: avoids the intermediate
+     * rotated buffer allocation and extra full-frame pass when both rotation
+     * and scaling are required. Byte-identical to `scaleNv21(rotateNv21(...))`.
+     */
+    fun rotateAndScaleNv21(
+        src: ByteArray,
+        width: Int,
+        height: Int,
+        rotation: Int,
+        outWidth: Int,
+        outHeight: Int,
+    ): ByteArray {
+        if (rotation != 90 && rotation != 180 && rotation != 270) {
+            return scaleNv21(src, width, height, outWidth, outHeight)
+        }
+        val rotW = if (rotation == 90 || rotation == 270) height else width
+        val rotH = if (rotation == 90 || rotation == 270) width else height
+        if (rotW == outWidth && rotH == outHeight) {
+            return rotateNv21(src, width, height, rotation)
+        }
+        if (width <= 0 || height <= 0 || outWidth <= 0 || outHeight <= 0 ||
+            width % 2 != 0 || height % 2 != 0 || outWidth % 2 != 0 || outHeight % 2 != 0
+        ) {
+            return rotateNv21(src, width, height, rotation)
+        }
+
+        val out = ByteArray(outWidth * outHeight * 3 / 2)
+
+        val bindsX = outWidth.toLong() * rotH >= outHeight.toLong() * rotW
+        val winW = if (bindsX) rotW else outWidth * rotH / outHeight
+        val winH = if (bindsX) outHeight * rotW / outWidth else rotH
+        val winLeft = (rotW - winW) / 2
+        val winTop = (rotH - winH) / 2
+
+        when (rotation) {
+            90 -> {
+                for (outY in 0 until outHeight) {
+                    val ry = winTop + outY * winH / outHeight
+                    val dstRow = outY * outWidth
+                    for (outX in 0 until outWidth) {
+                        val rx = winLeft + outX * winW / outWidth
+                        val sy = height - 1 - rx
+                        out[dstRow + outX] = src[sy * width + ry]
+                    }
+                }
+            }
+            270 -> {
+                for (outY in 0 until outHeight) {
+                    val ry = winTop + outY * winH / outHeight
+                    val sx = width - 1 - ry
+                    val dstRow = outY * outWidth
+                    for (outX in 0 until outWidth) {
+                        val rx = winLeft + outX * winW / outWidth
+                        out[dstRow + outX] = src[rx * width + sx]
+                    }
+                }
+            }
+            else -> { // 180
+                for (outY in 0 until outHeight) {
+                    val ry = winTop + outY * winH / outHeight
+                    val sy = height - 1 - ry
+                    val srcRow = sy * width
+                    val dstRow = outY * outWidth
+                    for (outX in 0 until outWidth) {
+                        val rx = winLeft + outX * winW / outWidth
+                        out[dstRow + outX] = src[srcRow + (width - 1 - rx)]
+                    }
+                }
+            }
+        }
+
+        val cwOut = outWidth / 2
+        val chOut = outHeight / 2
+        val cLeft = winLeft / 2
+        val cTop = winTop / 2
+        val cW = (winLeft + winW + 1) / 2 - cLeft
+        val cH = (winTop + winH + 1) / 2 - cTop
+        val srcUvStart = width * height
+        val dstUvStart = outWidth * outHeight
+        val srcHalfW = width / 2
+        val srcHalfH = height / 2
+
+        when (rotation) {
+            90 -> {
+                for (cy in 0 until chOut) {
+                    val rcy = cTop + cy * cH / chOut
+                    val dstRow = dstUvStart + cy * outWidth
+                    for (cx in 0 until cwOut) {
+                        val rcx = cLeft + cx * cW / cwOut
+                        val scy = srcHalfH - 1 - rcx
+                        val srcIdx = srcUvStart + scy * width + rcy * 2
+                        val dstIdx = dstRow + cx * 2
+                        out[dstIdx] = src[srcIdx]
+                        out[dstIdx + 1] = src[srcIdx + 1]
+                    }
+                }
+            }
+            270 -> {
+                for (cy in 0 until chOut) {
+                    val rcy = cTop + cy * cH / chOut
+                    val scx = srcHalfW - 1 - rcy
+                    val dstRow = dstUvStart + cy * outWidth
+                    for (cx in 0 until cwOut) {
+                        val rcx = cLeft + cx * cW / cwOut
+                        val srcIdx = srcUvStart + rcx * width + scx * 2
+                        val dstIdx = dstRow + cx * 2
+                        out[dstIdx] = src[srcIdx]
+                        out[dstIdx + 1] = src[srcIdx + 1]
+                    }
+                }
+            }
+            else -> { // 180
+                for (cy in 0 until chOut) {
+                    val rcy = cTop + cy * cH / chOut
+                    val scy = srcHalfH - 1 - rcy
+                    val srcRow = srcUvStart + scy * width
+                    val dstRow = dstUvStart + cy * outWidth
+                    for (cx in 0 until cwOut) {
+                        val rcx = cLeft + cx * cW / cwOut
+                        val scx = srcHalfW - 1 - rcx
+                        val srcIdx = srcRow + scx * 2
+                        val dstIdx = dstRow + cx * 2
+                        out[dstIdx] = src[srcIdx]
+                        out[dstIdx + 1] = src[srcIdx + 1]
+                    }
+                }
+            }
+        }
+
+        return out
+    }
+
+    /**
      * NV21 → NV12: reorders the interleaved UV plane from VU to UV on a copy.
      * Moved here from H264Encoder — the encode-path pixel swaps live with the
      * rest of the YUV knowledge.
      */
     fun nv21ToNv12(nv21: ByteArray, width: Int, height: Int): ByteArray {
+        val dst = ByteArray(nv21.size)
+        nv21ToNv12Into(nv21, width, height, dst)
+        return dst
+    }
+
+    /** Writes NV12 into caller-owned [dst] (length >= [nv21].size) with zero allocation. */
+    fun nv21ToNv12Into(nv21: ByteArray, width: Int, height: Int, dst: ByteArray) {
         val ySize = width * height
-        val nv12 = nv21.copyOf()
-
-        val uvStart = ySize
-        for (i in 0 until width * height / 2 step 2) {
-            val v = nv21[uvStart + i]
-            val u = nv21[uvStart + i + 1]
-            nv12[uvStart + i] = u
-            nv12[uvStart + i + 1] = v
+        System.arraycopy(nv21, 0, dst, 0, ySize)
+        val uvEnd = ySize + (ySize / 2 and (Int.MAX_VALUE xor 1))
+        var i = ySize
+        while (i + 1 < uvEnd) {
+            dst[i] = nv21[i + 1]
+            dst[i + 1] = nv21[i]
+            i += 2
         }
-
-        return nv12
     }
 
     /**
@@ -405,22 +681,25 @@ object YuvConverter {
         val ySize = width * height
         val uvPlaneSize = ySize / 4
         val i420 = ByteArray(ySize + uvPlaneSize * 2)
+        nv21ToI420Into(nv21, width, height, i420)
+        return i420
+    }
 
-        // Y plane
-        System.arraycopy(nv21, 0, i420, 0, ySize)
+    /** Writes I420 into caller-owned [dst] with zero allocation. */
+    fun nv21ToI420Into(nv21: ByteArray, width: Int, height: Int, dst: ByteArray) {
+        val ySize = width * height
+        val uvPlaneSize = ySize / 4
+        System.arraycopy(nv21, 0, dst, 0, ySize)
 
-        // U and V planar
         var src = ySize
         var uDst = ySize
         var vDst = ySize + uvPlaneSize
         while (src + 1 < nv21.size) {
             val v = nv21[src]
             val u = nv21[src + 1]
-            i420[uDst++] = u
-            i420[vDst++] = v
+            dst[uDst++] = u
+            dst[vDst++] = v
             src += 2
         }
-
-        return i420
     }
 }

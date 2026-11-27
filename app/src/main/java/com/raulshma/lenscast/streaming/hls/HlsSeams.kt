@@ -20,6 +20,13 @@ interface HlsVideoSink {
      * audio; sinks that do not mux TS ignore it.
      */
     fun setAudioFormat(sampleRateHz: Int, channelCount: Int) {}
+
+    /**
+     * Notifies the muxer that the upstream video encoder reconfigured (e.g.
+     * resolution or orientation flip), so the next keyframe closes the open
+     * segment and opens a `#EXT-X-DISCONTINUITY` segment cleanly.
+     */
+    fun onStreamReconfigured() {}
 }
 
 interface HlsSegmentSource {

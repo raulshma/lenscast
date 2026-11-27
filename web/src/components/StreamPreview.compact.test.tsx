@@ -92,11 +92,14 @@ describe('StreamPreview compact action bar (beta UI)', () => {
 
   it('pins the bar-end bubbles inside the frame: first key left-aligned, toggle right-aligned', () => {
     renderCompactPreview({ webActive: false, rtspActive: true })
-    // The bar's first key would push a centered bubble past the left edge;
-    // the trailing toggle would push one past the right. The old positional
-    // CSS now travels as data-tooltip-edge on the buttons themselves.
-    const first = document.querySelector('.preview-actions-left .action-btn')!
-    expect(first.getAttribute('data-tooltip-edge')).toBe('left')
+    // The bar's first key would push a centered bubble past the left edge —
+    // and so does the stats key beside it, which carries the bar's longest
+    // bubble in a narrow frame; the trailing toggle would push one past the
+    // right. The old positional CSS now travels as data-tooltip-edge on the
+    // buttons themselves.
+    const leftKeys = [...document.querySelectorAll('.preview-actions-left .action-btn')]
+    expect(leftKeys[0].getAttribute('data-tooltip-edge')).toBe('left')
+    expect(leftKeys[1].getAttribute('data-tooltip-edge')).toBe('left')
     const toggle = document.querySelector('.preview-actions-toggle')!
     expect(toggle.getAttribute('data-tooltip-edge')).toBe('right')
   })

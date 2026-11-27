@@ -34,6 +34,14 @@ internal class EncodedOverlayCompositor(
      */
     fun interface Rasterizer {
         fun render(settings: OverlaySettings, targetWidth: Int, nowMs: Long): YuvaStrip?
+
+        /** Client-count-aware variant for outputs that display viewer count (e.g. MJPEG). */
+        fun renderWithClients(
+            settings: OverlaySettings,
+            targetWidth: Int,
+            nowMs: Long,
+            clientCount: Int,
+        ): YuvaStrip? = render(settings, targetWidth, nowMs)
     }
 
     /** Interleaved Y,U,V,A bytes (one per pixel), exactly [argbToYuvaStrip]'s layout. */
@@ -46,11 +54,19 @@ internal class EncodedOverlayCompositor(
      * rasterizers instead.
      */
     object AndroidRasterizer : Rasterizer {
-        override fun render(settings: OverlaySettings, targetWidth: Int, nowMs: Long): YuvaStrip? {
+        override fun render(settings: OverlaySettings, targetWidth: Int, nowMs: Long): YuvaStrip? =
+            renderWithClients(settings, targetWidth, nowMs, ENCODED_VIEWER_COUNT)
+
+        override fun renderWithClients(
+            settings: OverlaySettings,
+            targetWidth: Int,
+            nowMs: Long,
+            clientCount: Int,
+        ): YuvaStrip? {
             val box = StreamOverlayRenderer.renderTextOverlayBitmap(
                 settings,
                 targetWidth,
-                ENCODED_VIEWER_COUNT,
+                clientCount,
                 nowMs,
             ) ?: return null
             val width = box.width
@@ -97,6 +113,7 @@ internal class EncodedOverlayCompositor(
         frameHeight: Int,
         nowMs: Long,
         frameShared: Boolean = false,
+        clientCount: Int = ENCODED_VIEWER_COUNT,
     ): ByteArray {
         val current = settings
         if (!OverlayLayoutPolicy.overlayPassNeeded(current)) return frame
@@ -113,12 +130,12 @@ internal class EncodedOverlayCompositor(
         // The rendered-content dirty check: the line list is what actually
         // shows, so a timestamp re-render happens exactly on its second
         // boundary (the default format) and nothing else re-rasterizes.
-        val lines = OverlayLayoutPolicy.buildOverlayLines(current, ENCODED_VIEWER_COUNT, nowMs)
+        val lines = OverlayLayoutPolicy.buildOverlayLines(current, clientCount, nowMs)
         val slot = slotFor(frameWidth, frameHeight)
         if (lines != slot.lines || current !== slot.settings) {
             slot.lines = lines
             slot.settings = current
-            slot.strip = rasterizer.render(current, frameWidth, nowMs)
+            slot.strip = rasterizer.renderWithClients(current, frameWidth, nowMs, clientCount)
             slot.position = slot.strip?.let {
                 OverlayLayoutPolicy.computeOverlayPosition(
                     current.position,

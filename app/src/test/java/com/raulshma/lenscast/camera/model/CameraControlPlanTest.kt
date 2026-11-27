@@ -852,4 +852,27 @@ class CameraControlPlanTest {
         assertEquals(14, plan.fpsUpper)
         assertEquals(listOf(CameraControlPlan.UNSUPPORTED_FPS_RANGE), plan.unsupported)
     }
+
+    @Test
+    fun `fixed fps target prefers locked floor at or above target over wide free-running AE range`() {
+        // POCO F1 HAL: {[15,15], [7,30], [30,30]} — asking for 24 or 25 fps
+        // must choose [30,30] (so FramePacer down-paces 30 -> 24/25) instead of
+        // [7,30] which lets indoor AE free-run down to ~13 fps.
+        val pocoHal = CaptureSupport(
+            targetFpsRanges = setOf(
+                CaptureSupport.FpsRange(15, 15),
+                CaptureSupport.FpsRange(7, 30),
+                CaptureSupport.FpsRange(30, 30),
+            ),
+        )
+        val plan24 = planFor(CameraSettings(frameRate = 24), pocoHal)
+        assertEquals(30, plan24.fpsLower)
+        assertEquals(30, plan24.fpsUpper)
+        assertTrue(plan24.unsupported.isEmpty())
+
+        val plan25 = planFor(CameraSettings(frameRate = 25), pocoHal)
+        assertEquals(30, plan25.fpsLower)
+        assertEquals(30, plan25.fpsUpper)
+        assertTrue(plan25.unsupported.isEmpty())
+    }
 }

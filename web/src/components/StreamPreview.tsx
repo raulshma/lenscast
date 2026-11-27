@@ -958,6 +958,7 @@ export default function StreamPreview(props: Props) {
             }}
             onClick={() => statsOverlay.cycle()}
             data-tooltip={tipAttr(t('preview.statsTitle', statsLabel()))}
+            data-tooltip-edge={tipAttr('left')}
             aria-label={tipAttr(t('preview.statsTitle', statsLabel()))}
             title={titleAttr(t('preview.statsTitle', statsLabel()))}
           >

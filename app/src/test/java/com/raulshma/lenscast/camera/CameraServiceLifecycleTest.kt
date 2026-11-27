@@ -296,4 +296,23 @@ class CameraServiceLifecycleTest {
         assertEquals(1, fixture.sessionConfigs.size)
         shadowOf(Looper.getMainLooper()).idle()
     }
+
+    @Test
+    fun `bindLargestCompatible keeps ImageCapture via legacy fallback when SessionConfig rejects full set`() {
+        val provider = fixture.serviceField<ProcessCameraProvider>("cameraProvider")
+        every {
+            provider.bindToLifecycle(any(), any(), any<SessionConfig>())
+        } throws IllegalArgumentException("60fps SessionConfig rejected for 3 use cases")
+
+        fixture.service.acquireKeepAlive()
+        applyOffMain(CameraSettings(frameRate = 60))
+
+        // Must keep all bound use cases via legacy vararg bind instead of dropping ImageCapture,
+        // and boundFpsRange must stay null since SessionConfig did not succeed.
+        assertEquals(1, fixture.binds.size)
+        assertTrue(fixture.binds.single().any { it is androidx.camera.core.ImageCapture })
+        assertTrue(fixture.sessionConfigs.isEmpty())
+        assertEquals(null, fixture.serviceField<Range<Int>?>("boundFpsRange"))
+        shadowOf(Looper.getMainLooper()).idle()
+    }
 }

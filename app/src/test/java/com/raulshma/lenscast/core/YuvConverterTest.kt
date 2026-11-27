@@ -494,4 +494,140 @@ class YuvConverterTest {
         }
         assertArrayEquals("input must not be mutated", before, src)
     }
+
+    @Test
+    fun `interleaved nv12 layout converts through the nv12 bulk path`() {
+        val width = 8
+        val height = 8
+        val y = ByteBuffer.wrap(ByteArray(width * height) { i -> yValue(i / width, i % width) })
+        val uvWidth = width / 2
+        val uvHeight = height / 2
+        val interleaved = ByteArray(uvWidth * uvHeight * 2)
+        var i = 0
+        for (row in 0 until uvHeight) {
+            for (col in 0 until uvWidth) {
+                interleaved[i++] = uValue(row, col)
+                interleaved[i++] = vValue(row, col)
+            }
+        }
+        val u = ByteBuffer.wrap(interleaved, 0, interleaved.size)
+        val v = ByteBuffer.wrap(interleaved, 1, interleaved.size - 1)
+        val result = YuvConverter.yuvToNv21(
+            yBuffer = y, uBuffer = u, vBuffer = v,
+            yRowStride = width, yPixelStride = 1,
+            uRowStride = width, uPixelStride = 2,
+            vRowStride = width, vPixelStride = 2,
+            width = width, height = height, cropLeft = 0, cropTop = 0,
+        )
+        assertArrayEquals(expectedNv21(width, height), result)
+    }
+
+    @Test
+    fun `rotateAndScaleNv21 matches separate rotateNv21 then scaleNv21 across rotations`() {
+        val w = 12
+        val h = 8
+        val src = patternNv21(w, h)
+        for (rotation in listOf(0, 90, 180, 270)) {
+            val rotW = if (rotation == 90 || rotation == 270) h else w
+            val rotH = if (rotation == 90 || rotation == 270) w else h
+            for ((outW, outH) in listOf(16 to 12, 8 to 8, 6 to 10, rotW to rotH)) {
+                val expected = YuvConverter.scaleNv21(
+                    YuvConverter.rotateNv21(src, w, h, rotation),
+                    rotW,
+                    rotH,
+                    outW,
+                    outH,
+                )
+                val actual = YuvConverter.rotateAndScaleNv21(src, w, h, rotation, outW, outH)
+                assertArrayEquals("rot=$rotation out=${outW}x$outH", expected, actual)
+            }
+        }
+    }
+
+    @Test
+    fun `nv21ToNv12Into and nv21ToI420Into write exact bytes into caller buffer`() {
+        val w = 8
+        val h = 6
+        val src = patternNv21(w, h)
+        val nv12Dst = ByteArray(src.size + 16)
+        YuvConverter.nv21ToNv12Into(src, w, h, nv12Dst)
+        assertArrayEquals(YuvConverter.nv21ToNv12(src, w, h), nv12Dst.copyOf(src.size))
+
+        val i420Dst = ByteArray(src.size + 16)
+        YuvConverter.nv21ToI420Into(src, w, h, i420Dst)
+        assertArrayEquals(YuvConverter.nv21ToI420(src, w, h), i420Dst.copyOf(src.size))
+    }
+
+    @Test
+    fun `separate ByteBuffer views with position zero use row bulk path for pixelStride 2`() {
+        val width = 8
+        val height = 8
+        val y = ByteBuffer.wrap(ByteArray(width * height) { i -> yValue(i / width, i % width) })
+        val uvWidth = width / 2
+        val uvHeight = height / 2
+        // Separate buffers both starting at position 0, just like real Camera2 ImageProxy planes
+        val vArr = ByteArray(uvWidth * uvHeight * 2)
+        val uArr = ByteArray(uvWidth * uvHeight * 2)
+        for (row in 0 until uvHeight) {
+            for (col in 0 until uvWidth) {
+                val idx = (row * uvWidth + col) * 2
+                vArr[idx] = vValue(row, col)
+                uArr[idx] = uValue(row, col)
+            }
+        }
+        val result = YuvConverter.yuvToNv21(
+            yBuffer = y,
+            uBuffer = ByteBuffer.wrap(uArr),
+            vBuffer = ByteBuffer.wrap(vArr),
+            yRowStride = width, yPixelStride = 1,
+            uRowStride = width, uPixelStride = 2,
+            vRowStride = width, vPixelStride = 2,
+            width = width, height = height, cropLeft = 0, cropTop = 0,
+        )
+        assertArrayEquals(expectedNv21(width, height), result)
+    }
+
+    @Test
+    fun `rawPlanesToNv21 matches yuvToNv21 for semi-planar and planar layouts`() {
+        val width = 8
+        val height = 8
+        val yArr = ByteArray(width * height) { i -> yValue(i / width, i % width) }
+        val uvWidth = width / 2
+        val uvHeight = height / 2
+
+        // Semi-planar pixelStride=2
+        val vSemi = ByteArray(uvWidth * uvHeight * 2)
+        val uSemi = ByteArray(uvWidth * uvHeight * 2)
+        for (row in 0 until uvHeight) {
+            for (col in 0 until uvWidth) {
+                val idx = (row * uvWidth + col) * 2
+                vSemi[idx] = vValue(row, col)
+                uSemi[idx] = uValue(row, col)
+            }
+        }
+        assertArrayEquals(
+            expectedNv21(width, height),
+            YuvConverter.rawPlanesToNv21(
+                yArr, uSemi, vSemi,
+                yRowStride = width, yPixelStride = 1,
+                uRowStride = width, uPixelStride = 2,
+                vRowStride = width, vPixelStride = 2,
+                width = width, height = height,
+            ),
+        )
+
+        // Planar pixelStride=1
+        val uPlanar = ByteArray(uvWidth * uvHeight) { i -> uValue(i / uvWidth, i % uvWidth) }
+        val vPlanar = ByteArray(uvWidth * uvHeight) { i -> vValue(i / uvWidth, i % uvWidth) }
+        assertArrayEquals(
+            expectedNv21(width, height),
+            YuvConverter.rawPlanesToNv21(
+                yArr, uPlanar, vPlanar,
+                yRowStride = width, yPixelStride = 1,
+                uRowStride = uvWidth, uPixelStride = 1,
+                vRowStride = uvWidth, vPixelStride = 1,
+                width = width, height = height,
+            ),
+        )
+    }
 }

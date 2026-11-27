@@ -29,6 +29,9 @@ internal interface VideoEncoder {
 
     fun encodeFrame(nv21Data: ByteArray)
 
+    /** Encodes a frame using the camera's monotonic sensor timestamp (ns) when available. */
+    fun encodeFrame(nv21Data: ByteArray, presentationTimeNs: Long) = encodeFrame(nv21Data)
+
     fun isEncoderLagged(): Boolean
 
     fun setBitrate(newBitrate: Int)
@@ -82,6 +85,10 @@ internal abstract class MediaCodecVideoEncoder(
 
     @Volatile
     override var onEncodedFrame: ((List<EncodedNalUnit>) -> Unit)? = null
+
+    // Reusable per-encoder scratch buffer for NV21→NV12/I420 conversion; touched
+    // exclusively by the caller feeding encodeFrame (single encode thread).
+    private var conversionScratch: ByteArray? = null
 
     private val harness = MediaCodecEncoderHarness(
         tag = tag,
@@ -178,6 +185,10 @@ internal abstract class MediaCodecVideoEncoder(
     }
 
     override fun encodeFrame(nv21Data: ByteArray) {
+        encodeFrame(nv21Data, presentationTimeNs = 0L)
+    }
+
+    override fun encodeFrame(nv21Data: ByteArray, presentationTimeNs: Long) {
         val codec = harness.activeCodec ?: return
         if (!harness.isRunning) return
 
@@ -195,6 +206,10 @@ internal abstract class MediaCodecVideoEncoder(
             val inputBufferIndex = codec.dequeueInputBuffer(5_000)
             if (inputBufferIndex < 0) {
                 pendingFrames.decrementAndGet()
+                droppedFrames++
+                if (droppedFrames % 30 == 0) {
+                    Log.w(tag, "Dropped $droppedFrames total frames (input buffer timeout)")
+                }
                 return
             }
 
@@ -203,20 +218,22 @@ internal abstract class MediaCodecVideoEncoder(
                 return
             }
             val frameData = convertInputFrame(nv21Data, width, height)
-            if (frameData.size > inputBuffer.capacity()) {
+            val frameByteSize = expectedInputByteSize(nv21Data, width, height)
+            if (frameByteSize > inputBuffer.capacity()) {
                 pendingFrames.decrementAndGet()
-                Log.w(tag, "Frame data (${frameData.size}) exceeds input buffer capacity (${inputBuffer.capacity()})")
+                Log.w(tag, "Frame data ($frameByteSize) exceeds input buffer capacity (${inputBuffer.capacity()})")
                 return
             }
             inputBuffer.clear()
-            inputBuffer.put(frameData)
+            inputBuffer.put(frameData, 0, frameByteSize)
 
+            val ptsUs = if (presentationTimeNs > 0L) presentationTimeNs / 1_000L else System.nanoTime() / 1_000L
             codec.queueInputBuffer(
                 inputBufferIndex,
                 0,
-                frameData.size,
-                System.nanoTime() / 1000,
-                0
+                frameByteSize,
+                ptsUs,
+                0,
             )
         } catch (e: Exception) {
             pendingFrames.decrementAndGet()
@@ -349,12 +366,33 @@ internal abstract class MediaCodecVideoEncoder(
         return flags and MediaCodec.BUFFER_FLAG_KEY_FRAME != 0
     }
 
+    private fun expectedInputByteSize(nv21: ByteArray, width: Int, height: Int): Int =
+        when (activeInputFormat) {
+            RtspInputFormat.NV21 -> nv21.size
+            RtspInputFormat.I420 -> {
+                val ySize = width * height
+                ySize + (ySize / 4) * 2
+            }
+            RtspInputFormat.NV12, RtspInputFormat.AUTO -> nv21.size
+        }
+
     private fun convertInputFrame(nv21: ByteArray, width: Int, height: Int): ByteArray {
         return when (activeInputFormat) {
             RtspInputFormat.NV21 -> nv21
-            RtspInputFormat.NV12 -> YuvConverter.nv21ToNv12(nv21, width, height)
-            RtspInputFormat.I420 -> YuvConverter.nv21ToI420(nv21, width, height)
-            RtspInputFormat.AUTO -> YuvConverter.nv21ToNv12(nv21, width, height)
+            RtspInputFormat.I420 -> {
+                val required = expectedInputByteSize(nv21, width, height)
+                val dst = conversionScratch?.takeIf { it.size >= required }
+                    ?: ByteArray(required).also { conversionScratch = it }
+                YuvConverter.nv21ToI420Into(nv21, width, height, dst)
+                dst
+            }
+            RtspInputFormat.NV12, RtspInputFormat.AUTO -> {
+                val required = nv21.size
+                val dst = conversionScratch?.takeIf { it.size >= required }
+                    ?: ByteArray(required).also { conversionScratch = it }
+                YuvConverter.nv21ToNv12Into(nv21, width, height, dst)
+                dst
+            }
         }
     }
 

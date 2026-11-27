@@ -31,6 +31,7 @@ import {
   channelStates,
   channelLed,
   formatKbps,
+  formatFps,
   linkLed,
   linkLabel,
   batteryTone,
@@ -161,7 +162,10 @@ export default function NextShell(props: Props) {
     const kbps = chips().bitrateKbps
     return kbps ? formatKbps(kbps) : null
   }
-  const fpsLabel = (): number | null => chips().fps
+  const fpsLabel = (): string | null => {
+    const fps = chips().fps
+    return fps ? formatFps(fps) : null
+  }
 
   const clientsLabel = (): number | null => {
     const s = streaming()

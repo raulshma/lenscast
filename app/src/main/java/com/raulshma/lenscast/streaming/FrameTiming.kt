@@ -14,4 +14,7 @@ object FrameTiming {
 
     /** Wall-clock frame interval in milliseconds. */
     fun frameIntervalMs(fps: Int): Long = 1_000L / effectiveFps(fps)
+
+    /** Monotonic nanosecond frame interval without millisecond truncation. */
+    fun frameIntervalNs(fps: Int): Long = 1_000_000_000L / effectiveFps(fps)
 }

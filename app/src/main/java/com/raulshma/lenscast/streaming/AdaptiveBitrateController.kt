@@ -31,6 +31,13 @@ class AdaptiveBitrateController(
     @Volatile
     private var defaultIntervalMs = config.defaultFrameIntervalMs
 
+    @Volatile
+    private var targetFpsValue = if (config.defaultFrameIntervalMs > 0) {
+        (1000f / config.defaultFrameIntervalMs).toInt()
+    } else {
+        0
+    }
+
     // Last values actually applied on the frame path.
     @Volatile
     private var appliedQuality = config.defaultQuality
@@ -62,7 +69,8 @@ class AdaptiveBitrateController(
     fun setDefaultFrameRate(fps: Int) {
         val clampedFps = fps.coerceIn(config.minFps, config.maxFps)
         val interval = 1000L / clampedFps
-        if (defaultIntervalMs == interval) return
+        if (defaultIntervalMs == interval && targetFpsValue == clampedFps) return
+        targetFpsValue = clampedFps
         defaultIntervalMs = interval
         if (!isEnabled.get()) {
             appliedIntervalMs = interval
@@ -111,8 +119,12 @@ class AdaptiveBitrateController(
             qualityLevel = networkMonitor.getNetworkQualityLevel(),
             currentQuality = appliedQuality,
             targetQuality = config.defaultQuality,
-            currentFps = if (appliedIntervalMs > 0) (1000f / appliedIntervalMs).toInt() else 0,
-            targetFps = if (defaultIntervalMs > 0) (1000f / defaultIntervalMs).toInt() else 0,
+            currentFps = when {
+                appliedIntervalMs == defaultIntervalMs -> targetFpsValue
+                appliedIntervalMs > 0 -> (1000f / appliedIntervalMs).toInt()
+                else -> 0
+            },
+            targetFps = targetFpsValue,
             // The congestion estimate (drain-rate based, 0-while-idle) — the
             // ladder's signal, deliberately not the window-measured stream
             // bitrate. Never invents a bandwidth number.

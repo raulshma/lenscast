@@ -168,10 +168,18 @@ internal class EncodedStreamHub(
     // different measurement and stays untouched.
     private val encodedRateWindow = SlidingRateWindow(nowMs = nowMs)
 
-    // Retained encode config: settings land here even while the pipeline is
-    // stopped, so the next start picks them all up (the RtspOutput pattern).
+    // Retained landscape tier from [setVideoResolution] and the active
+    // orientation-adjusted encode dimensions derived from it. When frames
+    // arrive upright in portrait (90°/270°), [videoWidth] and [videoHeight]
+    // swap to match so the encode preserves the full field of view instead of
+    // aspect-fill center-cropping portrait into landscape.
+    @Volatile private var tierWidth = StreamDefaults.RTSP_VIDEO_WIDTH
+    @Volatile private var tierHeight = StreamDefaults.RTSP_VIDEO_HEIGHT
     @Volatile private var videoWidth = StreamDefaults.RTSP_VIDEO_WIDTH
     @Volatile private var videoHeight = StreamDefaults.RTSP_VIDEO_HEIGHT
+    @Volatile private var subVideoWidth = StreamDefaults.RTSP_SUB_VIDEO_WIDTH
+    @Volatile private var subVideoHeight = StreamDefaults.RTSP_SUB_VIDEO_HEIGHT
+    @Volatile private var portraitOrientation = false
     @Volatile private var videoBitrate = StreamDefaults.RTSP_VIDEO_BITRATE
     @Volatile private var frameRate = StreamDefaults.STREAM_FPS
     @Volatile private var inputFormat = RtspInputFormat.AUTO
@@ -186,10 +194,8 @@ internal class EncodedStreamHub(
     @Volatile private var configuredChannelCount = -1
     @Volatile private var configuredAudioBitrateKbps = -1
 
-    private val frameThrottle = FrameThrottle(
-        intervalMs = { FrameTiming.frameIntervalMs(frameRate) },
-        tolerance = FrameThrottle.TOLERANCE,
-        updateClockOnReject = false,
+    private val framePacer = FramePacer(
+        intervalNs = { FrameTiming.frameIntervalNs(frameRate) },
     )
 
     init {
@@ -246,8 +252,15 @@ internal class EncodedStreamHub(
         // still active (else stopLocked would have landed), so the next
         // refresh simply retries the build.
         if (EncodedStreamPolicy.needsEncoderBuild(running.get(), activeEncoder != null)) {
+            val (targetW, targetH) = EncodedOrientationPolicy.orientedDimensions(
+                tierWidth,
+                tierHeight,
+                portraitOrientation,
+            )
+            videoWidth = targetW
+            videoHeight = targetH
             val encoder = encoderForLocked(activeVideoCodec)
-            encoder.configure(videoWidth, videoHeight, videoBitrate, frameRate)
+            encoder.configure(targetW, targetH, videoBitrate, frameRate)
             encoder.setInputFormat(inputFormat)
             if (!encoder.start()) {
                 Log.e(TAG, "${activeVideoCodec.wireName.uppercase()} encoder failed to start; encoded sinks stay idle")
@@ -261,7 +274,7 @@ internal class EncodedStreamHub(
             running.set(true)
             acceptedFrames.set(0)
             droppedFrames.set(0)
-            Log.d(TAG, "Encoded stream started (${activeVideoCodec.wireName}; rtsp/hls/ws sinks attached)")
+            Log.d(TAG, "Encoded stream started (${activeVideoCodec.wireName} ${targetW}x${targetH}; rtsp/hls/ws sinks attached)")
         }
         ensureSubEncoderLocked()
         ensureAudioLocked()
@@ -296,11 +309,18 @@ internal class EncodedStreamHub(
             return
         }
         if (subEncoder != null) return
+        val (subW, subH) = EncodedOrientationPolicy.orientedDimensions(
+            StreamDefaults.RTSP_SUB_VIDEO_WIDTH,
+            StreamDefaults.RTSP_SUB_VIDEO_HEIGHT,
+            portraitOrientation,
+        )
+        subVideoWidth = subW
+        subVideoHeight = subH
         val encoder = encoderFactory(RtspVideoCodec.H264)
         encoder.onEncodedFrame = { units -> subVideoSink(units) }
         encoder.configure(
-            StreamDefaults.RTSP_SUB_VIDEO_WIDTH,
-            StreamDefaults.RTSP_SUB_VIDEO_HEIGHT,
+            subW,
+            subH,
             subBitrate(),
             frameRate,
         )
@@ -311,7 +331,7 @@ internal class EncodedStreamHub(
         }
         subEncoder = encoder
         encoder.submitBlackFrame()
-        Log.d(TAG, "Sub-stream encoder started (${StreamDefaults.RTSP_SUB_VIDEO_WIDTH}x${StreamDefaults.RTSP_SUB_VIDEO_HEIGHT} H.264)")
+        Log.d(TAG, "Sub-stream encoder started (${subW}x${subH} H.264)")
     }
 
     private fun stopSubEncoderLocked() {
@@ -380,13 +400,23 @@ internal class EncodedStreamHub(
     // ── frames: the encode path ──
 
     /**
+     * Seeds the hub's orientation hint before frames arrive (e.g. when
+     * `orientationLocked` updates). Frame-level rotations still win per frame.
+     */
+    fun setOrientationHint(rotation: Int) {
+        portraitOrientation = EncodedOrientationPolicy.isPortraitRotation(rotation)
+    }
+
+    /**
      * One camera frame into the pipeline. Re-evaluates the policy at a
      * bounded rate, so a sink becoming active (a WS video client joining,
      * an output starting) spins the encoders up within
      * [FRAME_PATH_REFRESH_INTERVAL_MS] — and lets them wind down when the
      * last sink goes away.
      */
-    fun pushFrame(yuvData: ByteArray, width: Int, height: Int, rotation: Int) {
+    fun pushFrame(yuvData: ByteArray, width: Int, height: Int, rotation: Int, timestampNs: Long = 0L) {
+        val portrait = EncodedOrientationPolicy.isPortraitRotation(rotation)
+        portraitOrientation = portrait
         val now = System.currentTimeMillis()
         if (now - lastFramePathRefreshMs >= FRAME_PATH_REFRESH_INTERVAL_MS) {
             lastFramePathRefreshMs = now
@@ -394,9 +424,40 @@ internal class EncodedStreamHub(
         }
         if (!running.get()) return
 
-        if (!frameThrottle.accept(now)) {
+        val sampleNs = if (timestampNs > 0L) timestampNs else System.nanoTime()
+        if (!framePacer.accept(sampleNs)) {
             droppedFrames.incrementAndGet()
             return
+        }
+
+        val (desiredW, desiredH) = EncodedOrientationPolicy.orientedDimensions(tierWidth, tierHeight, portrait)
+        val (desiredSubW, desiredSubH) = EncodedOrientationPolicy.orientedDimensions(
+            StreamDefaults.RTSP_SUB_VIDEO_WIDTH,
+            StreamDefaults.RTSP_SUB_VIDEO_HEIGHT,
+            portrait,
+        )
+        if (desiredW != videoWidth || desiredH != videoHeight ||
+            (subEncoder != null && (desiredSubW != subVideoWidth || desiredSubH != subVideoHeight))
+        ) {
+            synchronized(stateLock) {
+                if (!running.get()) return
+                val (lockedW, lockedH) = EncodedOrientationPolicy.orientedDimensions(
+                    tierWidth,
+                    tierHeight,
+                    portraitOrientation,
+                )
+                if (lockedW != videoWidth || lockedH != videoHeight) {
+                    reconfigureEncoderLocked(lockedW, lockedH)
+                }
+                val (lockedSubW, lockedSubH) = EncodedOrientationPolicy.orientedDimensions(
+                    StreamDefaults.RTSP_SUB_VIDEO_WIDTH,
+                    StreamDefaults.RTSP_SUB_VIDEO_HEIGHT,
+                    portraitOrientation,
+                )
+                if (subEncoder != null && (lockedSubW != subVideoWidth || lockedSubH != subVideoHeight)) {
+                    reconfigureSubEncoderLocked()
+                }
+            }
         }
 
         val encoder = activeEncoder ?: return
@@ -405,69 +466,63 @@ internal class EncodedStreamHub(
             return
         }
 
-        val effectiveWidth: Int
-        val effectiveHeight: Int
-        var frameData: ByteArray
+        val encodeW = videoWidth
+        val encodeH = videoHeight
+        val sub = subEncoder
+        val subEncodeW = subVideoWidth
+        val subEncodeH = subVideoHeight
 
-        if (rotation == 90 || rotation == 270) {
-            effectiveWidth = height
-            effectiveHeight = width
-            frameData = YuvConverter.rotateNv21(yuvData, width, height, rotation)
-        } else if (rotation == 180) {
-            effectiveWidth = width
-            effectiveHeight = height
-            frameData = YuvConverter.rotateNv21(yuvData, width, height, rotation)
-        } else {
-            effectiveWidth = width
-            effectiveHeight = height
-            frameData = yuvData
-        }
-        // The frame the sub-stream scales from. When no rotation applies it
-        // still aliases the camera's own analysis array — which the MJPEG
-        // pipeline and the WHIP/WHEP taps read after this fan-out — so the
-        // overlay compositors must blend into their own copy in that case
-        // (frameData === yuvData is exactly the shared condition per target).
-        val rotated = frameData
+        val effectiveWidth = if (rotation == 90 || rotation == 270) height else width
+        val effectiveHeight = if (rotation == 90 || rotation == 270) width else height
         val overlayActive = overlayCompositor.overlayEnabled()
+        val needsScale = effectiveWidth != encodeW || effectiveHeight != encodeH
 
-        if (effectiveWidth != videoWidth || effectiveHeight != videoHeight) {
-            // The hub encodes the CONFIGURED size, whatever the camera's
-            // analysis resolution is: the frame is aspect-filled (scaled to
-            // cover, center-cropped) onto videoWidth x videoHeight. A
-            // resolution-setting change therefore lands on the very next
-            // frame, and a preview-resolution change never rewrites the RTSP
-            // output's own size — the reconfigure is reserved for input
-            // format and codec changes.
-            frameData = YuvConverter.scaleNv21(frameData, effectiveWidth, effectiveHeight, videoWidth, videoHeight)
+        var frameData: ByteArray
+        val rotated: ByteArray
+        if (sub == null && rotation != 0 && needsScale) {
+            // Single-pass rotate + scale avoids an intermediate rotated allocation
+            // and extra full-frame pass when the sub-stream is off.
+            frameData = YuvConverter.rotateAndScaleNv21(yuvData, width, height, rotation, encodeW, encodeH)
+            rotated = frameData
+        } else {
+            rotated = if (rotation == 90 || rotation == 180 || rotation == 270) {
+                YuvConverter.rotateNv21(yuvData, width, height, rotation)
+            } else {
+                yuvData
+            }
+            frameData = if (needsScale) {
+                // The hub encodes the CONFIGURED size in the frame's orientation,
+                // whatever the camera's analysis resolution is: when the camera
+                // aspect differs, the frame is aspect-filled onto encodeW x encodeH.
+                YuvConverter.scaleNv21(rotated, effectiveWidth, effectiveHeight, encodeW, encodeH)
+            } else {
+                rotated
+            }
         }
 
         acceptedFrames.incrementAndGet()
         encoder.encodeFrame(
             if (overlayActive) {
-                overlayCompositor.applyTo(frameData, videoWidth, videoHeight, now, frameData === yuvData)
+                overlayCompositor.applyTo(frameData, encodeW, encodeH, now, frameData === yuvData)
             } else {
                 frameData
             },
+            timestampNs,
         )
 
         // The sub-stream's feed: the rotated frame aspect-filled onto the
-        // fixed VGA (640×480) size, encoded by its own H.264 instance — one
-        // extra small-scale + small encode, only while opted in and running.
-        // Scaled from [rotated], NOT from the possibly re-scaled main frame:
-        // its dimensions moved under frameData, and feeding scaleNv21 the
-        // stale source dims corrupted /sub whenever the encode resolution
-        // differed from the analysis resolution.
-        val sub = subEncoder
+        // orientation-matched VGA (640×480 or 480×640) size, encoded by its own
+        // H.264 instance — one extra small-scale + small encode, only while
+        // opted in and running. Scaled from [rotated], NOT from the possibly
+        // re-scaled main frame.
         if (sub != null && !sub.isEncoderLagged()) {
-            var subFrame = if (effectiveWidth != StreamDefaults.RTSP_SUB_VIDEO_WIDTH ||
-                effectiveHeight != StreamDefaults.RTSP_SUB_VIDEO_HEIGHT
-            ) {
+            var subFrame = if (effectiveWidth != subEncodeW || effectiveHeight != subEncodeH) {
                 YuvConverter.scaleNv21(
                     rotated,
                     effectiveWidth,
                     effectiveHeight,
-                    StreamDefaults.RTSP_SUB_VIDEO_WIDTH,
-                    StreamDefaults.RTSP_SUB_VIDEO_HEIGHT,
+                    subEncodeW,
+                    subEncodeH,
                 )
             } else {
                 rotated
@@ -475,19 +530,28 @@ internal class EncodedStreamHub(
             if (overlayActive) {
                 subFrame = overlayCompositor.applyTo(
                     subFrame,
-                    StreamDefaults.RTSP_SUB_VIDEO_WIDTH,
-                    StreamDefaults.RTSP_SUB_VIDEO_HEIGHT,
+                    subEncodeW,
+                    subEncodeH,
                     now,
                     subFrame === yuvData,
                 )
             }
-            sub.encodeFrame(subFrame)
+            sub.encodeFrame(subFrame, timestampNs)
         }
     }
 
-    /** Live frame-rate change: throttle interval now, encoder at its next (re)configure. */
+    /** Live frame-rate change: updates pacer immediately and reconfigures live encoders' KEY_FRAME_RATE. */
     fun setFrameRate(fps: Int) {
-        frameRate = FrameTiming.effectiveFps(fps)
+        val effective = FrameTiming.effectiveFps(fps)
+        if (effective == frameRate) return
+        synchronized(stateLock) {
+            if (effective == frameRate) return
+            frameRate = effective
+            if (running.get()) {
+                reconfigureEncoderLocked(videoWidth, videoHeight)
+                reconfigureSubEncoderLocked()
+            }
+        }
     }
 
     /**
@@ -509,6 +573,12 @@ internal class EncodedStreamHub(
 
     /** The live encoder target bitrate — the adaptive controller's current value, for surfaces that advertise it (ONVIF profiles). */
     fun currentVideoBitrate(): Int = videoBitrate
+
+    /** The active oriented encode width (e.g. 720 in portrait 720p, 1280 in landscape). */
+    fun currentVideoWidth(): Int = videoWidth
+
+    /** The active oriented encode height (e.g. 1280 in portrait 720p, 720 in landscape). */
+    fun currentVideoHeight(): Int = videoHeight
 
     /**
      * The encoded lane's measured-stream status (issue #25): the encoder
@@ -555,12 +625,21 @@ internal class EncodedStreamHub(
      * unaffected.
      */
     fun setVideoResolution(width: Int, height: Int) {
-        if (width == videoWidth && height == videoHeight) return
+        if (width == tierWidth && height == tierHeight) return
         synchronized(stateLock) {
-            videoWidth = width
-            videoHeight = height
+            if (width == tierWidth && height == tierHeight) return
+            tierWidth = width
+            tierHeight = height
+            val (targetW, targetH) = EncodedOrientationPolicy.orientedDimensions(
+                tierWidth,
+                tierHeight,
+                portraitOrientation,
+            )
             if (running.get()) {
-                reconfigureEncoderLocked(width, height)
+                reconfigureEncoderLocked(targetW, targetH)
+            } else {
+                videoWidth = targetW
+                videoHeight = targetH
             }
         }
     }
@@ -632,16 +711,24 @@ internal class EncodedStreamHub(
         }
         activeEncoder = encoder
         encoder.submitBlackFrame()
+        hlsSink.onStreamReconfigured()
         Log.d(TAG, "Encoder reconfigured to ${width}x${height} (${activeVideoCodec.wireName})")
     }
 
-    /** Stop → configure → start on the live sub encoder (input-format changes); no-op while it is down. */
+    /** Stop → configure → start on the live sub encoder (input-format / orientation changes); no-op while it is down. */
     private fun reconfigureSubEncoderLocked() {
         val encoder = subEncoder ?: return
-        encoder.stop()
-        encoder.configure(
+        val (subW, subH) = EncodedOrientationPolicy.orientedDimensions(
             StreamDefaults.RTSP_SUB_VIDEO_WIDTH,
             StreamDefaults.RTSP_SUB_VIDEO_HEIGHT,
+            portraitOrientation,
+        )
+        subVideoWidth = subW
+        subVideoHeight = subH
+        encoder.stop()
+        encoder.configure(
+            subW,
+            subH,
             subBitrate(),
             frameRate,
         )

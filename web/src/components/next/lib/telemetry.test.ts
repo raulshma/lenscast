@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { channelLed, formatKbps, linkLed, batteryTone, thermalTone, vitalToneClass } from './telemetry'
+import { channelLed, formatKbps, formatFps, linkLed, batteryTone, thermalTone, vitalToneClass } from './telemetry'
 
 describe('channelLed', () => {
   it('reads on-air over everything else', () => {
@@ -17,6 +17,24 @@ describe('formatKbps', () => {
   it('stays in K below 1000 and switches to M above', () => {
     expect(formatKbps(980)).toBe('980K')
     expect(formatKbps(14_200)).toBe('14.2M')
+  })
+})
+
+describe('formatFps', () => {
+  it('caps a window measurement\'s float noise at two decimals', () => {
+    expect(formatFps(23.416666666666668)).toBe('23.42')
+    expect(formatFps(9.949999)).toBe('9.95')
+  })
+
+  it('trims trailing zeros but keeps the value\'s real decimals', () => {
+    expect(formatFps(23.5)).toBe('23.5')
+    expect(formatFps(14.999)).toBe('15')
+    expect(formatFps(0.5)).toBe('0.5')
+  })
+
+  it('leaves whole rates bare', () => {
+    expect(formatFps(24)).toBe('24')
+    expect(formatFps(15)).toBe('15')
   })
 })
 

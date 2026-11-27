@@ -6,7 +6,7 @@ import android.util.Log
 import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.core.YuvConverter
 import com.raulshma.lenscast.streaming.EncodedOverlayCompositor
-import com.raulshma.lenscast.streaming.FrameThrottle
+import com.raulshma.lenscast.streaming.FramePacer
 import com.raulshma.lenscast.streaming.FrameTiming
 import com.raulshma.lenscast.streaming.PublisherSession
 import com.raulshma.lenscast.streaming.webrtc.GatherObserver
@@ -47,6 +47,10 @@ internal interface WhipPublisherHandle {
 
     /** One NV21 analysis-tap frame from the camera. No-op while the video source is not up. */
     fun feedVideoFrame(nv21: ByteArray, width: Int, height: Int, rotation: Int)
+
+    /** Timestamped variant carrying the monotonic camera capture timestamp (ns). */
+    fun feedVideoFrame(nv21: ByteArray, width: Int, height: Int, rotation: Int, timestampNs: Long) =
+        feedVideoFrame(nv21, width, height, rotation)
 
     /** Live target-fps change: the frame throttle's interval moves immediately. */
     fun setFrameRate(fps: Int)
@@ -118,10 +122,8 @@ internal class WhipPublisher(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     @Volatile private var targetFps = StreamDefaults.STREAM_FPS
-    private val frameThrottle = FrameThrottle(
-        intervalMs = { FrameTiming.frameIntervalMs(targetFps) },
-        tolerance = FrameThrottle.TOLERANCE,
-        updateClockOnReject = false,
+    private val framePacer = FramePacer(
+        intervalNs = { FrameTiming.frameIntervalNs(targetFps) },
     )
 
     // The session's live collaborators, owned by the attempt coroutine and
@@ -157,12 +159,17 @@ internal class WhipPublisher(
     // ── the analysis tap's frame feed (camera thread) ──
 
     override fun feedVideoFrame(nv21: ByteArray, width: Int, height: Int, rotation: Int) {
+        feedVideoFrame(nv21, width, height, rotation, timestampNs = 0L)
+    }
+
+    override fun feedVideoFrame(nv21: ByteArray, width: Int, height: Int, rotation: Int, timestampNs: Long) {
         if (!session.isWanted()) return
         val source = videoSource ?: return
-        if (!frameThrottle.accept(System.currentTimeMillis())) return
+        val sampleNs = if (timestampNs > 0L) timestampNs else System.nanoTime()
+        if (!framePacer.accept(sampleNs)) return
 
         val prepared = prepareFrame(nv21, width, height, rotation, overlayCompositor, System.currentTimeMillis())
-        val frame = VideoFrame(NV21Buffer(prepared.nv21, prepared.width, prepared.height, null), 0, System.nanoTime())
+        val frame = VideoFrame(NV21Buffer(prepared.nv21, prepared.width, prepared.height, null), 0, sampleNs)
         source.capturerObserver.onFrameCaptured(frame)
     }
 

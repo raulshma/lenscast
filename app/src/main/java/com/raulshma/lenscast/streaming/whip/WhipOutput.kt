@@ -155,8 +155,8 @@ internal class WhipOutput(
     // ── the analysis tap's sink ──
 
     /** One camera NV21 frame from the manager's push fan-out. No-op while stopped. */
-    fun feedVideoFrame(nv21: ByteArray, width: Int, height: Int, rotation: Int) {
-        output.currentPublisher()?.feedVideoFrame(nv21, width, height, rotation)
+    fun feedVideoFrame(nv21: ByteArray, width: Int, height: Int, rotation: Int, timestampNs: Long = 0L) {
+        output.currentPublisher()?.feedVideoFrame(nv21, width, height, rotation, timestampNs)
     }
 
     private companion object {

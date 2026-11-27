@@ -71,6 +71,10 @@ object HlsManager : HlsVideoSink, HlsSegmentSource {
     // Set when a segment boundary absorbs an encoder-idle PTS gap; consumed by
     // the NEXT segment closed, which is the one that opens after the jump.
     private var nextDiscontinuity = false
+    // Set when the upstream encoder reconfigures (orientation/resolution/codec):
+    // the next keyframe closes any open segment immediately and tags the post-
+    // reconfig segment with #EXT-X-DISCONTINUITY so players re-initialize cleanly.
+    private var reconfigPending = false
     @Volatile private var enabled = false
 
     // DVR window: 0 keeps the sliding live ring (MAX_SEGMENTS + a 5-segment
@@ -145,6 +149,7 @@ object HlsManager : HlsVideoSink, HlsSegmentSource {
             pendingPrevLastPts = -1
             lastVideoPts = -1
             nextDiscontinuity = false
+            reconfigPending = false
             sequence.set(0)
         }
         videoAnchorMs = -1
@@ -172,6 +177,14 @@ object HlsManager : HlsVideoSink, HlsSegmentSource {
         }
     }
 
+    override fun onStreamReconfigured() {
+        synchronized(lock) {
+            if (pendingStartPts >= 0) {
+                reconfigPending = true
+            }
+        }
+    }
+
     override fun feedVideo(nalus: List<com.raulshma.lenscast.streaming.rtsp.EncodedNalUnit>) {
         if (!enabled || nalus.isEmpty()) return
         try {
@@ -192,10 +205,13 @@ object HlsManager : HlsVideoSink, HlsSegmentSource {
             synchronized(lock) {
                 if (pendingStartPts < 0) {
                     pendingStartPts = pts
-                } else if (isKeyFrame && pts - pendingStartPts >= MIN_SEGMENT_PTS) {
+                    reconfigPending = false
+                } else if (isKeyFrame && (reconfigPending || pts - pendingStartPts >= MIN_SEGMENT_PTS)) {
+                    val markDiscontinuity = reconfigPending
+                    reconfigPending = false
                     // Close on the keyframe that OPENS the next segment, so the
                     // duration spans exactly the AUs this segment holds.
-                    closeSegmentLocked(pts)
+                    closeSegmentLocked(pts, forceDiscontinuity = markDiscontinuity)
                     pendingStartPts = pts
                 }
                 pending.add(ts)
@@ -208,7 +224,7 @@ object HlsManager : HlsVideoSink, HlsSegmentSource {
     }
 
     /** Emits the open segment; [nextStartPts] is the PTS of the AU opening the next one. */
-    private fun closeSegmentLocked(nextStartPts: Long) {
+    private fun closeSegmentLocked(nextStartPts: Long, forceDiscontinuity: Boolean = false) {
         val seq = sequence.incrementAndGet()
         val combined = pending.fold(ByteArray(0)) { acc, b -> acc + b }
         // Declare the media the segment actually holds (last AU's display span
@@ -259,9 +275,9 @@ object HlsManager : HlsVideoSink, HlsSegmentSource {
             }
         }
         segments.addLast(HlsSegment(seq, combined, durationSec, startWallMs, discontinuity = nextDiscontinuity))
-        // The gap opens the NEXT segment: flag it so the playlist marks the
-        // discontinuity there and a joining player re-anchors its timestamps.
-        nextDiscontinuity = gapMs > 500
+        // The gap or stream reconfig opens the NEXT segment: flag it so the
+        // playlist marks the discontinuity there and a joining player re-anchors.
+        nextDiscontinuity = forceDiscontinuity || gapMs > 500
         // The ring bound: the DVR setting while raised, else the
         // compact sliding-live cap.
         val cap = if (dvrSegments > 0) dvrSegments else MAX_SEGMENTS

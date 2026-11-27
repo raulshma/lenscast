@@ -64,6 +64,15 @@ export function formatKbps(kbps: number): string {
   return kbps >= 1000 ? `${(kbps / 1000).toFixed(1)}M` : `${Math.round(kbps)}K`
 }
 
+/**
+ * Measured fps, capped at two decimals ("23.42") — a window measurement
+ * carries float noise (23.416666…) the chip must not print whole. Exact
+ * values stay bare: an integer reads "24", a clean tenth "23.4".
+ */
+export function formatFps(fps: number): string {
+  return Number.isInteger(fps) ? `${fps}` : fps.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')
+}
+
 const LINK_TONES: Record<string, LedTone> = {
   EXCELLENT: 'ok',
   GOOD: 'ok',

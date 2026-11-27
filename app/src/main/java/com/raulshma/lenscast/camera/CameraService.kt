@@ -60,6 +60,7 @@ import com.raulshma.lenscast.camera.model.SelectedLens
 import com.raulshma.lenscast.camera.model.SessionDemand
 import com.raulshma.lenscast.camera.model.StreamAspect
 import com.raulshma.lenscast.camera.model.StreamTarget
+import com.raulshma.lenscast.camera.model.TorchConvergencePolicy
 import com.raulshma.lenscast.camera.model.TorchState
 import com.raulshma.lenscast.camera.model.TorchStrengthPolicy
 import com.raulshma.lenscast.camera.model.ControlsApplyPolicy
@@ -143,9 +144,11 @@ class CameraService internal constructor(
      * targeted the closed session — manual ISO/exposure reset at recording
      * start and dashboard changes went dead until the next full rebind.
      */
+    @Volatile
     private var liveCamera: Camera? = null
     private var lifecycleOwner: LifecycleOwner? = null
     private var frameListener: ((ByteArray, Int, Int, Int) -> Unit)? = null
+    private var timestampedFrameListener: ((ByteArray, Int, Int, Int, Long) -> Unit)? = null
 
     // Second frame consumer: the pro-tools analyzer (histogram / zebras /
     // peaking), registered while the camera screen shows the preview. Rides
@@ -262,6 +265,39 @@ class CameraService internal constructor(
      * not ours to extinguish.
      */
     @Volatile private var torchDrivenOn = false
+
+    /**
+     * Serializes torch state, live-only overrides, and post-bind settle flags
+     * across Main (binds, [setTorchEnabled], post-bind rungs) and the Settings
+     * Applier's dispatcher ([applySettings]). Never held across a `suspend` call.
+     */
+    private val torchLock = Any()
+
+    /**
+     * Live-only torch override set by [setTorchEnabled] (Web API, deterrence,
+     * `SET_TORCH` receiver). Preserved across camera rebinds so stream start/stop
+     * never snaps a live-flipped LED back to stale persisted settings; cleared by
+     * an explicit persisted torch write or when the camera session unbinds.
+     */
+    private var liveTorchOverride: Boolean? = null
+
+    /**
+     * True from `unbindAll()` / rebind start until a post-bind settle apply
+     * (`forceFocusReapply = true` from `OPEN` or [schedulePostBindControlsApply])
+     * lands or `observeTorchState` observes `ON`. Prevents unrelated settings
+     * writes from converging `torchEnabled` to `false` during CameraX's bind-reset
+     * dark window.
+     */
+    private var torchSettlePending = false
+
+    /**
+     * Expected hardware torch target while an async `enableTorch` or strength
+     * call is in flight and CameraX's `torchState` LiveData has not yet caught up.
+     */
+    private var pendingHardwareTorchTarget: Boolean? = null
+
+    /** Monotonic token cancelling stale safety timeouts for [pendingHardwareTorchTarget]. */
+    private var torchDriveToken = 0L
 
     // The streaming analysis window's tier, steered by the encode resolution
     // through the Settings Applier. Read live at bind time, so a busy camera
@@ -528,13 +564,52 @@ class CameraService internal constructor(
                 Log.w(TAG, "setTorchEnabled: no flash unit")
                 return false
             }
-            cam.cameraControl.enableTorch(on)
-            torchDrivenOn = on
+            synchronized(torchLock) {
+                drivenTorchStrengthLevel = null
+                val future = cam.cameraControl.enableTorch(on)
+                torchDrivenOn = on
+                liveTorchOverride = on
+                torchSettlePending = false
+                armPendingHardwareTorchLocked(cam, targetOn = on, future = future)
+            }
             true
         } catch (e: Exception) {
             Log.w(TAG, "setTorchEnabled failed", e)
             false
         }
+    }
+
+    /**
+     * Marks an async hardware torch transition in flight until either
+     * `observeTorchState` delivers the target state, [future] completes, or
+     * [TORCH_HARDWARE_SETTLE_TIMEOUT_MS] elapses. Must hold [torchLock].
+     */
+    private fun armPendingHardwareTorchLocked(
+        cam: Camera,
+        targetOn: Boolean,
+        future: ListenableFuture<*>?,
+    ) {
+        val observedOn = cam.cameraInfo.torchState.value == CameraXTorchState.ON
+        if (observedOn == targetOn) {
+            pendingHardwareTorchTarget = null
+            return
+        }
+        val token = ++torchDriveToken
+        pendingHardwareTorchTarget = targetOn
+        future?.addListener({
+            synchronized(torchLock) {
+                if (torchDriveToken == token) {
+                    pendingHardwareTorchTarget = null
+                }
+            }
+        }, directExecutor)
+        controlsHandler.postDelayed({
+            synchronized(torchLock) {
+                if (torchDriveToken == token) {
+                    pendingHardwareTorchTarget = null
+                }
+            }
+        }, TORCH_HARDWARE_SETTLE_TIMEOUT_MS)
     }
 
     /**
@@ -561,7 +636,16 @@ class CameraService internal constructor(
      */
     private fun observeTorchState(cam: Camera) {
         val observer = Observer<Int> { live ->
-            publishTorchState(live == CameraXTorchState.ON)
+            val liveOn = live == CameraXTorchState.ON
+            synchronized(torchLock) {
+                if (pendingHardwareTorchTarget == liveOn) {
+                    pendingHardwareTorchTarget = null
+                }
+                if (liveOn) {
+                    torchSettlePending = false
+                }
+            }
+            publishTorchState(liveOn)
         }
         torchStateObserver = observer
         controlsHandler.post {
@@ -828,6 +912,11 @@ class CameraService internal constructor(
 
     fun setFrameListener(listener: ((ByteArray, Int, Int, Int) -> Unit)?) {
         frameListener = listener
+    }
+
+    /** Frame listener that also receives the sensor's monotonic capture timestamp (ns). */
+    fun setTimestampedFrameListener(listener: ((ByteArray, Int, Int, Int, Long) -> Unit)?) {
+        timestampedFrameListener = listener
     }
 
     /**
@@ -1357,6 +1446,11 @@ class CameraService internal constructor(
             for (step in plan.steps) {
                 when (step) {
                     is BindChoreography.RecordingBindStep.DetachObservations -> {
+                        synchronized(torchLock) {
+                            torchSettlePending = true
+                            pendingHardwareTorchTarget = null
+                            torchDriveToken++
+                        }
                         stopTorchObservation()
                         stopCameraOpenObservation()
                     }
@@ -1367,7 +1461,7 @@ class CameraService internal constructor(
                             attempt.map { slot -> standardCases.getValue(slot) }
                         },
                         writeBack = step.writeBackStandardFields,
-                    ).also { bound = it }
+                    ).also { bound = it.camera }
                     is BindChoreography.RecordingBindStep.AttachObservations -> {
                         val cam = bound!! // the plan orders Attach after Bind — set by the step above
                         observeTorchState(cam)
@@ -1379,6 +1473,7 @@ class CameraService internal constructor(
             true
         } catch (e: Exception) {
             Log.e(TAG, "bindRecording: no compatible combination found", e)
+            clearBoundUseCases()
             false
         }
     }
@@ -1586,13 +1681,21 @@ class CameraService internal constructor(
             }
 
         try {
+            // Mark the bind settle window active before unbinding: CameraX's
+            // unbindAll() + fresh bind resets torchState to OFF until the
+            // OPEN / post-bind controls apply re-lights it.
+            synchronized(torchLock) {
+                torchSettlePending = true
+                pendingHardwareTorchTarget = null
+                torchDriveToken++
+            }
             // Detach the previous session's torch observation first: the old
             // camera's live data dies with the unbind below, and the attach
             // must follow the new bind (main-thread posts stay in order).
             stopTorchObservation()
             stopCameraOpenObservation()
             provider.unbindAll()
-            val bound: Camera = try {
+            val boundSession: BoundSession = try {
                 bindLargestCompatible(
                     provider,
                     owner,
@@ -1620,18 +1723,20 @@ class CameraService internal constructor(
                         )
                     } catch (retryError: Exception) {
                         Log.e(TAG, "bindUseCases: failed to bind camera after re-enumeration", retryError)
+                        clearBoundUseCases()
                         _cameraState.value = CameraState.Error("Failed to start camera: ${retryError.message}")
                         return false
                     }
                 } else {
                     Log.e(TAG, "bindUseCases: failed to bind camera", e)
+                    clearBoundUseCases()
                     _cameraState.value = CameraState.Error("Failed to start camera: ${e.message}")
                     return false
                 }
             }
 
-            bound.let { cam ->
-                boundFpsRange = bindFpsRange
+            boundSession.camera.let { cam ->
+                boundFpsRange = boundSession.appliedSessionFps
                 // The live torch fact: observe the camera just bound. Every
                 // flip (local enableTorch, a remote writer, the re-asserted
                 // strength) republishes [torchState].
@@ -1801,13 +1906,18 @@ class CameraService internal constructor(
      * whatever actually bound; recording passes false so [unbindRecording]
      * can restore the standard set.
      */
+    private data class BoundSession(
+        val camera: Camera,
+        val appliedSessionFps: Range<Int>?,
+    )
+
     private fun bindLargestCompatible(
         provider: ProcessCameraProvider,
         owner: LifecycleOwner,
         combinations: List<List<UseCase>>,
         writeBack: Boolean,
         targetFpsRange: Range<Int>? = null,
-    ): Camera {
+    ): BoundSession {
         fun tryBind(useCases: List<UseCase>, withSessionFps: Boolean): Camera {
             provider.unbindAll()
             return if (withSessionFps && targetFpsRange != null) {
@@ -1820,7 +1930,11 @@ class CameraService internal constructor(
             }
         }
 
-        fun acceptBound(useCases: List<UseCase>, boundCamera: Camera): Camera {
+        fun acceptBound(
+            useCases: List<UseCase>,
+            boundCamera: Camera,
+            appliedSessionFps: Range<Int>?,
+        ): BoundSession {
             // Both variants bind a live session — the write-back=false
             // caller (bindRecording) must route its control applies and
             // observations at this instance too, not the dead predecessor.
@@ -1835,20 +1949,28 @@ class CameraService internal constructor(
 
             Log.d(
                 TAG,
-                "bindLargestCompatible: bound ${useCases.joinToString { it.javaClass.simpleName }}"
+                "bindLargestCompatible: bound ${useCases.joinToString { it.javaClass.simpleName }}" +
+                    if (appliedSessionFps != null) " (sessionFps=$appliedSessionFps)" else "",
             )
-            return boundCamera
+            return BoundSession(boundCamera, appliedSessionFps)
         }
 
         var lastError: Exception? = null
         val passes = if (targetFpsRange != null) listOf(true, false) else listOf(false)
-        for (withSessionFps in passes) {
-            for (useCases in combinations) {
-                if (useCases.isEmpty()) continue
+        // Combinations are outer so a rejected session-level fps range falls
+        // back to legacy binding for the FULL use-case set before dropping
+        // ImageCapture / ImageAnalysis.
+        for (useCases in combinations) {
+            if (useCases.isEmpty()) continue
+            for (withSessionFps in passes) {
                 try {
                     val boundCamera = tryBind(useCases, withSessionFps)
-                    return acceptBound(useCases, boundCamera)
+                    val appliedFps = if (withSessionFps) targetFpsRange else null
+                    return acceptBound(useCases, boundCamera, appliedFps)
                 } catch (e: Exception) {
+                    if (e is IllegalArgumentException && e.message?.contains("No available camera") == true) {
+                        throw e
+                    }
                     lastError = e
                     Log.w(
                         TAG,
@@ -1874,9 +1996,15 @@ class CameraService internal constructor(
         boundFpsRange = null
         boundPhotoConfig = null
         // Unbound camera = torch dark: the live fact dies with the session,
-        // and the driven strength goes with it (TorchState's KDoc).
-        drivenTorchStrengthLevel = null
-        torchDrivenOn = false
+        // and the driven strength / live-only override go with it (TorchState's KDoc).
+        synchronized(torchLock) {
+            drivenTorchStrengthLevel = null
+            torchDrivenOn = false
+            liveTorchOverride = null
+            torchSettlePending = false
+            pendingHardwareTorchTarget = null
+            torchDriveToken++
+        }
         _torchState.value = TorchState.Off
     }
 
@@ -1978,46 +2106,222 @@ class CameraService internal constructor(
         }
     }
 
+    private val frameConvertExecutor by lazy {
+        java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+            Thread(r, "FrameConvert").apply { isDaemon = true; priority = Thread.NORM_PRIORITY + 1 }
+        }
+    }
+
+    private class RawFrameSlot {
+        var width = 0
+        var height = 0
+        var rotation = 0
+        var timestampNs = 0L
+        var yRowStride = 0
+        var yPixelStride = 0
+        var uRowStride = 0
+        var uPixelStride = 0
+        var vRowStride = 0
+        var vPixelStride = 0
+        var yBytes = ByteArray(0)
+        var uBytes = ByteArray(0)
+        var vBytes = ByteArray(0)
+    }
+
+    // Triple-buffered raw plane slots: FrameAnalysis owns writeSlotIdx (copies
+    // raw plane slices + closes ImageProxy immediately), FrameConvert owns
+    // readSlotIdx, and pendingSlotIdx bridges them under rawSlotLock.
+    private val rawSlotLock = Any()
+    private val rawSlots = Array(3) { RawFrameSlot() }
+    private var writeSlotIdx = 0
+    private var pendingSlotIdx = 1
+    private var readSlotIdx = 2
+    private var hasPendingRawFrame = false
+    private var convertWorkerScheduled = false
+
     private var consecutiveFrameErrors = 0
     private var lastFrameErrorTime = 0L
 
     private fun processFrame(imageProxy: ImageProxy) {
         try {
-            val cropRect = imageProxy.cropRect
-            val width = cropRect.width()
-            val height = cropRect.height()
+            val crop = imageProxy.cropRect
+            val width = crop.width()
+            val height = crop.height()
             val rotation = imageProxy.imageInfo.rotationDegrees
+            val timestampNs = imageProxy.imageInfo.timestamp
             // The freshest sensor-to-display rotation the analysis stream saw —
             // the capture/recording target-rotation computation reads it, so a
             // locked-orientation still matches the streams even when the
             // display's own rotation is not what the mount suggests.
             lastSensorRotationDegrees = rotation
+
+            if (width >= 2 && height >= 2 && copyPlanesIntoPendingSlot(imageProxy, crop, width, height, rotation, timestampNs)) {
+                return
+            }
+
             val yuvData = yuvToNv21(imageProxy)
             if (yuvData != null) {
-                consecutiveFrameErrors = 0
-                frameListener?.invoke(yuvData, width, height, rotation)
-                proToolsFrameListener?.invoke(yuvData, width, height, rotation)
+                dispatchNv21Frame(yuvData, width, height, rotation, timestampNs)
             }
         } catch (e: Exception) {
-            // The window/threshold verdicts are the pure FrameErrorPolicy's;
-            // this callback only keeps the counter and the last-error stamp.
-            val now = System.currentTimeMillis()
-            if (FrameErrorPolicy.streakExpired(now, lastFrameErrorTime)) {
-                consecutiveFrameErrors = 0
-            }
-            consecutiveFrameErrors++
-            Log.e(TAG, "Frame processing error #${consecutiveFrameErrors}", e)
-            // Consulted against the PREVIOUS stamp so the policy's window
-            // verdict is meaningful; the stamp advances after the verdict.
-            if (FrameErrorPolicy.shouldRecover(consecutiveFrameErrors, now, lastFrameErrorTime)) {
-                Log.w(TAG, "Too many frame errors, attempting recovery")
-                consecutiveFrameErrors = 0
-                triggerAutoRecovery()
-            }
-            lastFrameErrorTime = now
+            recordFrameError(e)
         } finally {
             imageProxy.close()
         }
+    }
+
+    private fun copyPlanesIntoPendingSlot(
+        image: ImageProxy,
+        crop: android.graphics.Rect,
+        width: Int,
+        height: Int,
+        rotation: Int,
+        timestampNs: Long,
+    ): Boolean {
+        val planes = image.planes
+        if (planes.size < 3) return false
+        val yPlane = planes[0]
+        val uPlane = planes[1]
+        val vPlane = planes[2]
+
+        val yRowStride = yPlane.rowStride
+        val yPixelStride = yPlane.pixelStride
+        val uRowStride = uPlane.rowStride
+        val uPixelStride = uPlane.pixelStride
+        val vRowStride = vPlane.rowStride
+        val vPixelStride = vPlane.pixelStride
+
+        val yStart = crop.top * yRowStride + crop.left * yPixelStride
+        val yNeeded = (height - 1) * yRowStride + (width - 1) * yPixelStride + 1
+        val uvWidth = width / 2
+        val uvHeight = height / 2
+        val uvCropTop = crop.top / 2
+        val uvCropLeft = crop.left / 2
+        val uStart = uvCropTop * uRowStride + uvCropLeft * uPixelStride
+        val uNeeded = (uvHeight - 1) * uRowStride + (uvWidth - 1) * uPixelStride + 1
+        val vStart = uvCropTop * vRowStride + uvCropLeft * vPixelStride
+        val vNeeded = (uvHeight - 1) * vRowStride + (uvWidth - 1) * vPixelStride + 1
+
+        val yBuf = yPlane.buffer
+        val uBuf = uPlane.buffer
+        val vBuf = vPlane.buffer
+        if (yBuf.limit() < yStart + yNeeded ||
+            uBuf.limit() < uStart + uNeeded ||
+            vBuf.limit() < vStart + vNeeded
+        ) {
+            return false
+        }
+
+        val slot = rawSlots[writeSlotIdx]
+        if (slot.yBytes.size < yNeeded) slot.yBytes = ByteArray(yNeeded)
+        if (slot.uBytes.size < uNeeded) slot.uBytes = ByteArray(uNeeded)
+        if (slot.vBytes.size < vNeeded) slot.vBytes = ByteArray(vNeeded)
+
+        val yDup = yBuf.duplicate()
+        yDup.position(yStart)
+        yDup.get(slot.yBytes, 0, yNeeded)
+
+        val uDup = uBuf.duplicate()
+        uDup.position(uStart)
+        uDup.get(slot.uBytes, 0, uNeeded)
+
+        val vDup = vBuf.duplicate()
+        vDup.position(vStart)
+        vDup.get(slot.vBytes, 0, vNeeded)
+
+        slot.width = width
+        slot.height = height
+        slot.rotation = rotation
+        slot.timestampNs = timestampNs
+        slot.yRowStride = yRowStride
+        slot.yPixelStride = yPixelStride
+        slot.uRowStride = uRowStride
+        slot.uPixelStride = uPixelStride
+        slot.vRowStride = vRowStride
+        slot.vPixelStride = vPixelStride
+
+        val shouldSchedule: Boolean
+        synchronized(rawSlotLock) {
+            val prevPending = pendingSlotIdx
+            pendingSlotIdx = writeSlotIdx
+            writeSlotIdx = prevPending
+            hasPendingRawFrame = true
+            shouldSchedule = !convertWorkerScheduled
+            if (shouldSchedule) convertWorkerScheduled = true
+        }
+        if (shouldSchedule) {
+            frameConvertExecutor.execute(::drainRawFrames)
+        }
+        return true
+    }
+
+    private fun drainRawFrames() {
+        while (true) {
+            val slot: RawFrameSlot
+            synchronized(rawSlotLock) {
+                if (!hasPendingRawFrame) {
+                    convertWorkerScheduled = false
+                    return
+                }
+                val prevRead = readSlotIdx
+                readSlotIdx = pendingSlotIdx
+                pendingSlotIdx = prevRead
+                hasPendingRawFrame = false
+                slot = rawSlots[readSlotIdx]
+            }
+            try {
+                val yuvData = YuvConverter.rawPlanesToNv21(
+                    yBytes = slot.yBytes,
+                    uBytes = slot.uBytes,
+                    vBytes = slot.vBytes,
+                    yRowStride = slot.yRowStride,
+                    yPixelStride = slot.yPixelStride,
+                    uRowStride = slot.uRowStride,
+                    uPixelStride = slot.uPixelStride,
+                    vRowStride = slot.vRowStride,
+                    vPixelStride = slot.vPixelStride,
+                    width = slot.width,
+                    height = slot.height,
+                )
+                if (yuvData != null) {
+                    dispatchNv21Frame(yuvData, slot.width, slot.height, slot.rotation, slot.timestampNs)
+                }
+            } catch (e: Exception) {
+                recordFrameError(e)
+            }
+        }
+    }
+
+    private fun dispatchNv21Frame(
+        yuvData: ByteArray,
+        width: Int,
+        height: Int,
+        rotation: Int,
+        timestampNs: Long,
+    ) {
+        consecutiveFrameErrors = 0
+        timestampedFrameListener?.invoke(yuvData, width, height, rotation, timestampNs)
+        frameListener?.invoke(yuvData, width, height, rotation)
+        proToolsFrameListener?.invoke(yuvData, width, height, rotation)
+    }
+
+    private fun recordFrameError(e: Exception) {
+        // The window/threshold verdicts are the pure FrameErrorPolicy's;
+        // this callback only keeps the counter and the last-error stamp.
+        val now = System.currentTimeMillis()
+        if (FrameErrorPolicy.streakExpired(now, lastFrameErrorTime)) {
+            consecutiveFrameErrors = 0
+        }
+        consecutiveFrameErrors++
+        Log.e(TAG, "Frame processing error #${consecutiveFrameErrors}", e)
+        // Consulted against the PREVIOUS stamp so the policy's window
+        // verdict is meaningful; the stamp advances after the verdict.
+        if (FrameErrorPolicy.shouldRecover(consecutiveFrameErrors, now, lastFrameErrorTime)) {
+            Log.w(TAG, "Too many frame errors, attempting recovery")
+            consecutiveFrameErrors = 0
+            triggerAutoRecovery()
+        }
+        lastFrameErrorTime = now
     }
 
     private fun triggerAutoRecovery() {
@@ -2190,35 +2494,45 @@ class CameraService internal constructor(
      * torch lit by the system flashlight tile.
      */
     suspend fun applySettings(settings: CameraSettings, torchIntent: Boolean? = null) {
-        val boundSettings = activeSettings
-        val torchTouched = !settingsEverApplied ||
-            torchIntent != null ||
-            boundSettings.torchEnabled != settings.torchEnabled ||
-            boundSettings.torchStrength != settings.torchStrength
-        val effective = if (torchTouched) {
-            settings
-        } else {
-            val converged = settings.copy(torchEnabled = isTorchOn())
-            if (converged != settings) {
-                val torchPersister = persistTorchFact
-                if (torchPersister == null) {
-                    Log.w(TAG, "applySettings: no torch fact persister wired; torch convergence not persisted")
-                } else {
-                    Log.d(
-                        TAG,
-                        "applySettings: torch untouched — converging stored intent to the live fact (on=${converged.torchEnabled})",
-                    )
-                    // The write carries only the LED fact; the store's field
-                    // write folds it into the disk truth (issue #25 — the
-                    // old whole-snapshot write could clobber a concurrent
-                    // camera write).
-                    torchPersister(converged.torchEnabled)
-                }
+        val boundSettings: CameraSettings
+        val resolution: TorchConvergencePolicy.ApplyResolution
+        synchronized(torchLock) {
+            boundSettings = activeSettings
+            resolution = TorchConvergencePolicy.resolveApply(
+                settings = settings,
+                boundSettings = boundSettings,
+                settingsEverApplied = settingsEverApplied,
+                torchIntent = torchIntent,
+                hasBoundCamera = liveCamera != null,
+                liveTorchOn = isTorchOn(),
+                liveTorchOverride = liveTorchOverride,
+                torchSettlePending = torchSettlePending,
+                pendingHardwareTorchTarget = pendingHardwareTorchTarget,
+            )
+            if (resolution.clearLiveTorchOverride) {
+                liveTorchOverride = null
             }
-            converged
+            settingsEverApplied = true
+            activeSettings = resolution.effective
         }
-        settingsEverApplied = true
-        activeSettings = effective
+        val effective = resolution.effective
+        val persistFact = resolution.persistTorchFact
+        if (persistFact != null) {
+            val torchPersister = persistTorchFact
+            if (torchPersister == null) {
+                Log.w(TAG, "applySettings: no torch fact persister wired; torch convergence not persisted")
+            } else {
+                Log.d(
+                    TAG,
+                    "applySettings: torch untouched — converging stored intent to the live fact (on=$persistFact)",
+                )
+                // The write carries only the LED fact; the store's field
+                // write folds it into the disk truth (issue #25 — the
+                // old whole-snapshot write could clobber a concurrent
+                // camera write).
+                torchPersister(persistFact)
+            }
+        }
         if (outputRotationChanged(boundSettings, effective)) {
             // The ImageCapture bakes the output rotation in at bind time
             // (target rotation); a change rebinds through the same arbiter
@@ -2365,28 +2679,46 @@ class CameraService internal constructor(
 
         try {
             if (cam.cameraInfo.hasFlashUnit()) {
-                if (settings.torchEnabled) {
-                    // Per-level torch strength (API 33+): the strength call
-                    // itself switches the flash on, so it replaces — rather
-                    // than follows — enableTorch(true). Calling enableTorch
-                    // first flashed the default level and then stepped it.
-                    // The policy's null verdict (unsupported SDK, single-level
-                    // flash, unknown max) or a failed drive falls back to the
-                    // binary torch, so light always reaches the subject.
-                    val levelApplied = settings.torchStrength != null &&
-                        applyTorchStrength(cam, settings.torchStrength)
-                    if (!levelApplied) {
+                synchronized(torchLock) {
+                    val target = TorchConvergencePolicy.resolveControlTarget(settings, liveTorchOverride)
+                    if (target.enabled) {
+                        // Per-level torch strength (API 33+): the strength call
+                        // itself switches the flash on, so it replaces — rather
+                        // than follows — enableTorch(true). Calling enableTorch
+                        // first flashed the default level and then stepped it.
+                        // The policy's null verdict (unsupported SDK, single-level
+                        // flash, unknown max) or a failed drive falls back to the
+                        // binary torch, so light always reaches the subject.
+                        val levelApplied = target.strength != null &&
+                            applyTorchStrength(cam, target.strength)
+                        if (!levelApplied) {
+                            drivenTorchStrengthLevel = null
+                            val future = cam.cameraControl.enableTorch(true)
+                            armPendingHardwareTorchLocked(cam, targetOn = true, future = future)
+                        } else {
+                            armPendingHardwareTorchLocked(cam, targetOn = true, future = null)
+                        }
+                        torchDrivenOn = true
+                    } else if (torchDrivenOn) {
+                        // Only extinguish a torch this service lit — see
+                        // [torchDrivenOn]. The level this apply drove feeds
+                        // [torchState] and dies with the off state.
                         drivenTorchStrengthLevel = null
-                        cam.cameraControl.enableTorch(true)
+                        val future = cam.cameraControl.enableTorch(false)
+                        armPendingHardwareTorchLocked(cam, targetOn = false, future = future)
+                        torchDrivenOn = false
                     }
-                    torchDrivenOn = true
-                } else if (torchDrivenOn) {
-                    // Only extinguish a torch this service lit — see
-                    // [torchDrivenOn]. The level this apply drove feeds
-                    // [torchState] and dies with the off state.
-                    drivenTorchStrengthLevel = null
-                    cam.cameraControl.enableTorch(false)
-                    torchDrivenOn = false
+                    // Only a post-bind settle apply (OPEN edge or timed post-bind
+                    // rung, both of which pass forceFocusReapply = true) ends the
+                    // bind settle window; a synchronous apply inside applySettings
+                    // right after a rebind lands inside CameraX's bind window.
+                    if (forceFocusReapply) {
+                        torchSettlePending = false
+                    }
+                }
+            } else if (forceFocusReapply) {
+                synchronized(torchLock) {
+                    torchSettlePending = false
                 }
             }
         } catch (e: Exception) {
@@ -2726,6 +3058,7 @@ class CameraService internal constructor(
         lastFocusApplied = null
         try {
             analysisExecutor.shutdown()
+            frameConvertExecutor.shutdown()
         } catch (_: Exception) {
         }
     }
@@ -2742,6 +3075,13 @@ class CameraService internal constructor(
         internal const val WIDE_ANALYSIS_HEIGHT = 720
         internal const val FOUR_THREE_ANALYSIS_WIDTH = 960
         internal const val FOUR_THREE_ANALYSIS_HEIGHT = 720
+
+        /**
+         * Fail-safe upper bound for clearing [pendingHardwareTorchTarget] when
+         * an async `enableTorch` / `turnOnTorchWithStrengthLevel` drive does not
+         * emit a matching `torchState` callback (e.g. device-hal rejection).
+         */
+        private const val TORCH_HARDWARE_SETTLE_TIMEOUT_MS = 500L
 
         /** Fail-fast line for bind attempts before the CAMERA permission exists. */
         private const val CAMERA_PERMISSION_REQUIRED_MESSAGE =

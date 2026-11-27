@@ -28,7 +28,7 @@ object StreamDefaults {
     const val ADAPTIVE_JPEG_QUALITY_MIN = 15
     const val ADAPTIVE_JPEG_QUALITY_MAX = 95
     const val ADAPTIVE_FPS_MIN = 3
-    const val ADAPTIVE_FPS_MAX = 30
+    const val ADAPTIVE_FPS_MAX = 60
     // Eco idle-fps mode: the frame-rate floor while on battery with no stream
     // consumers (clamped against ADAPTIVE_FPS_MIN and the user's own rate).
     const val ECO_IDLE_FPS = 5

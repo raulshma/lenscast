@@ -1,7 +1,5 @@
 package com.raulshma.lenscast.streaming
 
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.ImageFormat
 import android.graphics.Rect
 import android.graphics.YuvImage
@@ -33,10 +31,10 @@ class YuvFrame(
 
 /**
  * The web frame pipeline: camera YUV in, overlaid JPEG out. Owns the
- * frame-interval throttle (thermal + adaptive), JPEG quality resolution,
- * YUV→JPEG conversion with reusable buffers, the conflated frame queue, and
- * the processed/dropped counters. Activity gating stays with
- * StreamingManager; the pixel work sits behind this small interface.
+ * frame-interval pacer (thermal + adaptive), JPEG quality resolution,
+ * single-pass NV21 overlay + YUV→JPEG conversion with reusable buffers, the
+ * conflated frame queue, and the processed/dropped counters. Activity gating
+ * stays with StreamingManager; the pixel work sits behind this small interface.
  */
 class FramePipeline(
     private val qualityPolicy: StreamQualityPolicy,
@@ -62,17 +60,26 @@ class FramePipeline(
     val processedFrames: StateFlow<Int> = _processedFrames
 
     @Volatile
+    private var targetFps = StreamDefaults.STREAM_FPS
+
+    @Volatile
     private var minFrameIntervalMs = FrameTiming.frameIntervalMs(StreamDefaults.STREAM_FPS)
 
     @Volatile
     private var jpegQuality = StreamDefaults.JPEG_QUALITY
 
-    // Accept slightly early frames (TOLERANCE = 0.8) so 60 fps (16ms interval)
-    // does not drop frames on 1-2 ms camera-clock jitter, while still stamping
-    // the reference time only on accepted frames.
-    private val throttle = FrameThrottle(
-        intervalMs = { qualityPolicy.resolveInterval(minFrameIntervalMs) },
-        tolerance = FrameThrottle.TOLERANCE,
+    private val overlayCompositor = EncodedOverlayCompositor()
+
+    private val pacer = FramePacer(
+        intervalNs = {
+            val baseMs = minFrameIntervalMs
+            val resolvedMs = qualityPolicy.resolveInterval(baseMs)
+            when {
+                resolvedMs == Long.MAX_VALUE -> Long.MAX_VALUE
+                resolvedMs == baseMs -> FrameTiming.frameIntervalNs(targetFps)
+                else -> resolvedMs * 1_000_000L
+            }
+        },
     )
 
     private val maxBufferSize = 4 * 1024 * 1024
@@ -88,14 +95,16 @@ class FramePipeline(
     }
 
     fun setFrameRate(fps: Int) {
-        minFrameIntervalMs = FrameTiming.frameIntervalMs(fps)
+        val effective = FrameTiming.effectiveFps(fps)
+        targetFps = effective
+        minFrameIntervalMs = FrameTiming.frameIntervalMs(effective)
     }
 
     fun setJpegQuality(quality: Int) {
         jpegQuality = quality
     }
 
-    /** Throttle and enqueue one frame. False when it was dropped by the throttle. */
+    /** Pace and enqueue one frame. False when it was dropped by the pacer. */
     fun push(
         yuvData: ByteArray,
         width: Int,
@@ -103,14 +112,15 @@ class FramePipeline(
         rotation: Int,
         overlay: OverlaySettings,
         clientCount: Int,
+        timestampNs: Long = 0L,
     ): Boolean {
-        val now = System.currentTimeMillis()
-        if (!throttle.accept(now)) {
+        val sampleNs = if (timestampNs > 0L) timestampNs else System.nanoTime()
+        if (!pacer.accept(sampleNs)) {
             droppedFrameCount.incrementAndGet()
             return false
         }
 
-        // Quality resolves only for frames that pass the throttle: the
+        // Quality resolves only for frames that pass the pacer: the
         // adaptive module's driven state must reflect flowing frames alone.
         val quality = qualityPolicy.resolveQuality(jpegQuality)
 
@@ -133,23 +143,37 @@ class FramePipeline(
 
     private fun process(frame: YuvFrame) {
         try {
-            var jpegData = yuvToJpeg(frame.yuvData, frame.width, frame.height, frame.quality, frame.rotation) ?: return
+            val outWidth = if (frame.rotation == 90 || frame.rotation == 270) frame.height else frame.width
+            val outHeight = if (frame.rotation == 90 || frame.rotation == 270) frame.width else frame.height
+            var nv21 = if (frame.rotation != 0) {
+                YuvConverter.rotateNv21(frame.yuvData, frame.width, frame.height, frame.rotation)
+            } else {
+                frame.yuvData
+            }
 
             if (OverlayLayoutPolicy.overlayPassNeeded(frame.overlay)) {
-                val decoded = BitmapFactory.decodeByteArray(jpegData, 0, jpegData.size)
-                if (decoded == null && frame.overlay.maskingEnabled && frame.overlay.maskingZones.any { it.enabled }) {
-                    Log.e(TAG, "Cannot decode frame for privacy masking; dropping it")
-                    droppedFrameCount.incrementAndGet()
-                    publishCounters()
-                    return
-                }
-                if (decoded != null) {
-                    val withOverlay = StreamOverlayRenderer.applyOverlay(decoded, frame.overlay, frame.clientCount)
-                    if (withOverlay !== decoded) decoded.recycle()
-                    jpegData = bitmapToJpegReuse(withOverlay, frame.quality.coerceAtLeast(85))
-                    if (withOverlay !== decoded && withOverlay.isRecycled.not()) withOverlay.recycle()
+                try {
+                    overlayCompositor.setOverlaySettings(frame.overlay)
+                    nv21 = overlayCompositor.applyTo(
+                        nv21,
+                        outWidth,
+                        outHeight,
+                        System.currentTimeMillis(),
+                        frameShared = (nv21 === frame.yuvData),
+                        clientCount = frame.clientCount,
+                    )
+                } catch (e: Exception) {
+                    if (frame.overlay.maskingEnabled && frame.overlay.maskingZones.any { it.enabled }) {
+                        Log.e(TAG, "Cannot apply privacy masking; dropping frame", e)
+                        droppedFrameCount.incrementAndGet()
+                        publishCounters()
+                        return
+                    }
+                    Log.w(TAG, "Overlay pass failed; continuing without text overlay", e)
                 }
             }
+
+            val jpegData = nv21ToJpeg(nv21, outWidth, outHeight, frame.quality) ?: return
 
             listener?.invoke(jpegData)
             processedFrameCount.incrementAndGet()
@@ -172,48 +196,19 @@ class FramePipeline(
         }
     }
 
-    private fun yuvToJpeg(yuvData: ByteArray, width: Int, height: Int, quality: Int, rotation: Int = 0): ByteArray? {
+    private fun nv21ToJpeg(nv21: ByteArray, width: Int, height: Int, quality: Int): ByteArray? {
         return try {
-            // One NV21 rotate + one JPEG encode. The historical path here
-            // (encode → decode → Matrix rotate → encode) tripled the
-            // per-frame pixel work on the exact frames that always carry a
-            // 90° sensor rotation (portrait phones) and stacked generational
-            // JPEG artifacts into every stream.
-            if (rotation != 0) {
-                val rotated = YuvConverter.rotateNv21(yuvData, width, height, rotation)
-                val rotatedWidth = if (rotation == 90 || rotation == 270) height else width
-                val rotatedHeight = if (rotation == 90 || rotation == 270) width else height
-                val yuvImage = YuvImage(rotated, ImageFormat.NV21, rotatedWidth, rotatedHeight, null)
-                synchronized(bufferLock) {
-                    reusableBuffer.reset()
-                    yuvImage.compressToJpeg(Rect(0, 0, rotatedWidth, rotatedHeight), quality, reusableBuffer)
-                    val result = reusableBuffer.toByteArray()
-                    capBuffer(reusableBuffer)
-                    result
-                }
-            } else {
-                val yuvImage = YuvImage(yuvData, ImageFormat.NV21, width, height, null)
-                synchronized(bufferLock) {
-                    reusableBuffer.reset()
-                    yuvImage.compressToJpeg(Rect(0, 0, width, height), quality, reusableBuffer)
-                    val result = reusableBuffer.toByteArray()
-                    capBuffer(reusableBuffer)
-                    result
-                }
+            val yuvImage = YuvImage(nv21, ImageFormat.NV21, width, height, null)
+            synchronized(bufferLock) {
+                reusableBuffer.reset()
+                yuvImage.compressToJpeg(Rect(0, 0, width, height), quality, reusableBuffer)
+                val result = reusableBuffer.toByteArray()
+                capBuffer(reusableBuffer)
+                result
             }
         } catch (e: Exception) {
             Log.e(TAG, "YUV to JPEG conversion failed", e)
             null
-        }
-    }
-
-    private fun bitmapToJpegReuse(bitmap: Bitmap, quality: Int): ByteArray {
-        synchronized(bufferLock) {
-            reusableBuffer.reset()
-            bitmap.compress(Bitmap.CompressFormat.JPEG, quality, reusableBuffer)
-            val result = reusableBuffer.toByteArray()
-            capBuffer(reusableBuffer)
-            return result
         }
     }
 

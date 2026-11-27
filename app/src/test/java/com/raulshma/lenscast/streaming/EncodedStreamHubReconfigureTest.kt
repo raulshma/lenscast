@@ -1,11 +1,13 @@
 package com.raulshma.lenscast.streaming
 
+import com.raulshma.lenscast.core.YuvConverter
 import com.raulshma.lenscast.streaming.hls.HlsVideoSink
 import com.raulshma.lenscast.streaming.rtsp.EncodedNalUnit
 import com.raulshma.lenscast.streaming.rtsp.RtspInputFormat
 import com.raulshma.lenscast.streaming.rtsp.RtspVideoCodec
 import com.raulshma.lenscast.streaming.rtsp.VideoEncoder
 import java.io.InputStream
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -39,6 +41,7 @@ class EncodedStreamHubReconfigureTest {
         val encodedFrames = mutableListOf<ByteArray>()
         var configuredWidth = 0
         var configuredHeight = 0
+        var configuredFrameRate = 0
         var configureCount = 0
         var started = false
         var failStarts = 0
@@ -46,6 +49,7 @@ class EncodedStreamHubReconfigureTest {
         override fun configure(width: Int, height: Int, bitrate: Int, frameRate: Int) {
             configuredWidth = width
             configuredHeight = height
+            configuredFrameRate = frameRate
             configureCount++
         }
 
@@ -111,9 +115,24 @@ class EncodedStreamHubReconfigureTest {
         override fun feedAudio(aacData: ByteArray) {}
     }
 
-    /** A hub with an active RTSP sink and audio off, handing back the given encoder as the main one. */
-    private fun hubWith(mainEncoder: FakeVideoEncoder): EncodedStreamHub {
-        val handOut = mutableListOf<VideoEncoder>(mainEncoder)
+    private class RecordingHlsSink : HlsVideoSink {
+        var reconfigureNotifications = 0
+        override fun feedVideo(nalus: List<EncodedNalUnit>) {}
+        override fun feedAudio(aacData: ByteArray) {}
+        override fun onStreamReconfigured() {
+            reconfigureNotifications++
+        }
+    }
+
+    /** A hub with an active RTSP sink and audio off, handing back the given encoder(s). */
+    private fun hubWith(
+        mainEncoder: FakeVideoEncoder,
+        subEncoder: FakeVideoEncoder? = null,
+        hlsSink: HlsVideoSink = noopHlsSink,
+    ): EncodedStreamHub {
+        val handOut = mutableListOf<VideoEncoder>(mainEncoder).apply {
+            if (subEncoder != null) add(subEncoder)
+        }
         return EncodedStreamHub(
             policyInputs = {
                 EncodedStreamPolicy.Inputs(
@@ -129,7 +148,7 @@ class EncodedStreamHubReconfigureTest {
             audioWanted = { false },
             audioBitrateKbps = { 128 },
             rtspSink = noopRtspSink,
-            hlsSink = noopHlsSink,
+            hlsSink = hlsSink,
             wsVideoSink = {},
             rtmpSink = noopRtspSink,
             encoderFactory = { handOut.removeAt(0) },
@@ -226,5 +245,107 @@ class EncodedStreamHubReconfigureTest {
 
         assertEquals(configuresAfterStart, encoder.configureCount)
         assertTrue(encoder.started)
+    }
+
+    @Test
+    fun `a live frame-rate change reconfigures the running encoder while unchanged fps is a no-op`() {
+        val encoder = FakeVideoEncoder()
+        val hub = hubWith(encoder)
+        hub.refresh()
+        val configuresAfterStart = encoder.configureCount
+
+        // Same fps (default 24): no reconfigure churn.
+        hub.setFrameRate(24)
+        assertEquals(configuresAfterStart, encoder.configureCount)
+
+        // Real fps change while running: encoder reconfigures with new KEY_FRAME_RATE.
+        hub.setFrameRate(60)
+        assertEquals(configuresAfterStart + 1, encoder.configureCount)
+        assertEquals(60, encoder.configuredFrameRate)
+        assertTrue(encoder.started)
+    }
+
+    @Test
+    fun `portrait frame configures 720x1280 and rotates full frame without cropping`() {
+        val encoder = FakeVideoEncoder()
+        val hlsSink = RecordingHlsSink()
+        val hub = hubWith(encoder, hlsSink = hlsSink)
+
+        val src = ByteArray(1280 * 720 * 3 / 2) { i -> (i % 251).toByte() }
+        hub.pushFrame(src, 1280, 720, rotation = 90, timestampNs = 1_000_000L)
+
+        assertTrue(hub.isRunning())
+        assertEquals(720, encoder.configuredWidth)
+        assertEquals(1280, encoder.configuredHeight)
+        assertEquals(720, hub.currentVideoWidth())
+        assertEquals(1280, hub.currentVideoHeight())
+        assertEquals(720, hub.encodedStreamStatus().width)
+        assertEquals(1280, hub.encodedStreamStatus().height)
+        assertEquals(1, encoder.encodedFrames.size)
+        assertArrayEquals(YuvConverter.rotateNv21(src, 1280, 720, 90), encoder.encodedFrames.single())
+        assertEquals(0, hlsSink.reconfigureNotifications)
+    }
+
+    @Test
+    fun `orientation change mid-stream reconfigures main and sub encoders and notifies hls`() {
+        val mainEncoder = FakeVideoEncoder()
+        val subEncoder = FakeVideoEncoder()
+        val hlsSink = RecordingHlsSink()
+        val hub = hubWith(mainEncoder, subEncoder, hlsSink)
+        hub.setSubStreamEnabled(true)
+
+        // Start in portrait (90°).
+        val frame = ByteArray(1280 * 720 * 3 / 2)
+        hub.pushFrame(frame, 1280, 720, rotation = 90, timestampNs = 1_000_000L)
+        assertEquals(720, mainEncoder.configuredWidth)
+        assertEquals(1280, mainEncoder.configuredHeight)
+        assertEquals(480, subEncoder.configuredWidth)
+        assertEquals(640, subEncoder.configuredHeight)
+        assertEquals(0, hlsSink.reconfigureNotifications)
+
+        // Rotate to landscape (0°).
+        hub.pushFrame(frame, 1280, 720, rotation = 0, timestampNs = 100_000_000L)
+        assertEquals(1280, mainEncoder.configuredWidth)
+        assertEquals(720, mainEncoder.configuredHeight)
+        assertEquals(640, subEncoder.configuredWidth)
+        assertEquals(480, subEncoder.configuredHeight)
+        assertEquals(1, hlsSink.reconfigureNotifications)
+        assertEquals(1280 * 720 * 3 / 2, mainEncoder.encodedFrames.last().size)
+        assertEquals(640 * 480 * 3 / 2, subEncoder.encodedFrames.last().size)
+
+        // Rotate back to portrait (270°).
+        hub.pushFrame(frame, 1280, 720, rotation = 270, timestampNs = 200_000_000L)
+        assertEquals(720, mainEncoder.configuredWidth)
+        assertEquals(1280, mainEncoder.configuredHeight)
+        assertEquals(480, subEncoder.configuredWidth)
+        assertEquals(640, subEncoder.configuredHeight)
+        assertEquals(2, hlsSink.reconfigureNotifications)
+    }
+
+    @Test
+    fun `orientation hint seeds initial portrait encode before first frame`() {
+        val encoder = FakeVideoEncoder()
+        val hub = hubWith(encoder)
+        hub.setOrientationHint(90)
+
+        hub.refresh()
+
+        assertEquals(720, encoder.configuredWidth)
+        assertEquals(1280, encoder.configuredHeight)
+        assertEquals(1, encoder.configureCount)
+    }
+
+    @Test
+    fun `resolution tier change while in portrait reconfigures to portrait dimensions`() {
+        val encoder = FakeVideoEncoder()
+        val hub = hubWith(encoder)
+        hub.pushFrame(ByteArray(1280 * 720 * 3 / 2), 1280, 720, rotation = 90, timestampNs = 1_000_000L)
+
+        hub.setVideoResolution(1920, 1080)
+
+        assertEquals(1080, encoder.configuredWidth)
+        assertEquals(1920, encoder.configuredHeight)
+        assertEquals(1080, hub.currentVideoWidth())
+        assertEquals(1920, hub.currentVideoHeight())
     }
 }

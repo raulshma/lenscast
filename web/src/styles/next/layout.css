@@ -1009,6 +1009,29 @@
     width: 100%;
   }
 
+  /* Toggle and diagnostics rows never stack: a 44px switch and a short
+     reading always fit beside their label, and stacking them reads
+     broken — the switch stretches into a full-width pill, the reading
+     drifts mid-row on its 60% right-aligned box. */
+  [data-ui='next'] .nx-inspector .nx-field-row:has(> .nx-switch),
+  [data-ui='next'] .nx-inspector .nx-info-panel .nx-field-row {
+    align-items: center;
+    flex-direction: row;
+  }
+
+  /* The switch takes its concrete 44px back — `width: auto` here would
+     win the cascade over the kit's 44px and size the label to its
+     content, which is nothing (input, track, and thumb are all
+     absolutely positioned), collapsing the toggle to zero width. The
+     info reading keeps auto: its text is in flow. */
+  [data-ui='next'] .nx-inspector .nx-field-row:has(> .nx-switch) > .nx-switch {
+    width: 44px;
+  }
+
+  [data-ui='next'] .nx-inspector .nx-info-panel .nx-field-row > .nx-info-value {
+    width: auto;
+  }
+
   [data-ui='next'] .nx-inspector .nx-log-thumb,
   [data-ui='next'] .nx-inspector .nx-log-clip,
   [data-ui='next'] .nx-inspector .nx-log-chip-label {

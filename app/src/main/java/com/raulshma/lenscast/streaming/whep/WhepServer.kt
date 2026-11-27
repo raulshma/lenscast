@@ -9,7 +9,7 @@ import com.raulshma.lenscast.core.YuvConverter
 import com.raulshma.lenscast.core.toHexString
 import com.raulshma.lenscast.camera.model.OverlaySettings
 import com.raulshma.lenscast.streaming.EncodedOverlayCompositor
-import com.raulshma.lenscast.streaming.FrameThrottle
+import com.raulshma.lenscast.streaming.FramePacer
 import com.raulshma.lenscast.streaming.FrameTiming
 import com.raulshma.lenscast.streaming.whip.WhipOfferBuilder
 import com.raulshma.lenscast.streaming.webrtc.GatherObserver
@@ -160,10 +160,8 @@ class WhepServer internal constructor(
     private val random = SecureRandom()
 
     @Volatile private var targetFps = StreamDefaults.STREAM_FPS
-    private val frameThrottle = FrameThrottle(
-        intervalMs = { FrameTiming.frameIntervalMs(targetFps) },
-        tolerance = FrameThrottle.TOLERANCE,
-        updateClockOnReject = false,
+    private val framePacer = FramePacer(
+        intervalNs = { FrameTiming.frameIntervalNs(targetFps) },
     )
 
     /** The shared libwebrtc environment, built lazily and only rebuilt while no session holds it. */
@@ -213,12 +211,13 @@ class WhepServer internal constructor(
     // ── the manager's fan-ins ──
 
     /** One camera NV21 analysis-tap frame, fanned to the shared video source (WHIP's frame feed twin). */
-    fun feedVideoFrame(nv21: ByteArray, width: Int, height: Int, rotation: Int) {
+    fun feedVideoFrame(nv21: ByteArray, width: Int, height: Int, rotation: Int, timestampNs: Long = 0L) {
         val env = environment ?: return
         if (sessions.isEmpty()) return
-        if (!frameThrottle.accept(System.currentTimeMillis())) return
+        val sampleNs = if (timestampNs > 0L) timestampNs else System.nanoTime()
+        if (!framePacer.accept(sampleNs)) return
         val tap = prepareTapFrame(nv21, width, height, rotation, overlayCompositor, System.currentTimeMillis())
-        val frame = VideoFrame(NV21Buffer(tap.nv21, tap.width, tap.height, null), 0, System.nanoTime())
+        val frame = VideoFrame(NV21Buffer(tap.nv21, tap.width, tap.height, null), 0, sampleNs)
         env.videoSource.capturerObserver.onFrameCaptured(frame)
     }
 
