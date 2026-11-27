@@ -418,9 +418,39 @@ class AddDeviceViewModel(
     }
 
     /**
+     * Sheet-open hygiene: a sheet re-opened after a completed pairing must
+     * leave the terminal [AddDeviceUiState.Saved] state and start a fresh
+     * scan; a sheet re-opened into [AddDeviceMode.DISCOVER] after an outside-
+     * tap dismiss restarts the radar that [onDismissRequested] stopped.
+     */
+    fun onSheetOpened() {
+        when (val current = _state.value) {
+            is AddDeviceUiState.Saved -> {
+                revealedRole = null
+                _state.value = AddDeviceUiState.Editing(
+                    mode = AddDeviceMode.SCAN,
+                    form = PairingForm(),
+                )
+            }
+            is AddDeviceUiState.Editing -> if (current.mode == AddDeviceMode.DISCOVER) {
+                _state.update { s ->
+                    if (s is AddDeviceUiState.Editing && s.mode == AddDeviceMode.DISCOVER) {
+                        s.copy(scanning = true, discovered = emptyList())
+                    } else {
+                        s
+                    }
+                }
+                discovery.start()
+            }
+            else -> Unit
+        }
+    }
+
+    /**
      * Dismissal hygiene: kill any in-flight chain, decide any open TOFU
      * dialog (as a decline — the dialog dies with the sheet), and stop the
-     * radar. The form survives in state so a re-open keeps the draft.
+     * radar. An in-flight test/TOFU reverts to Editing so re-opening never
+     * strands a spinner; the draft form survives in state.
      */
     fun onDismissRequested() {
         pairJob?.cancel()
@@ -428,6 +458,19 @@ class AddDeviceViewModel(
         tofuDecision?.complete(false)
         tofuDecision = null
         discovery.stop()
+        _state.update { current ->
+            when (current) {
+                is AddDeviceUiState.Testing -> AddDeviceUiState.Editing(
+                    mode = current.mode,
+                    form = current.form,
+                )
+                is AddDeviceUiState.ConfirmTofu -> AddDeviceUiState.Editing(
+                    mode = AddDeviceMode.MANUAL,
+                    form = current.form,
+                )
+                else -> current
+            }
+        }
     }
 
     override fun onCleared() {

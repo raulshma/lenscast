@@ -798,4 +798,12 @@
     <string name="automation_condition_desc_recording">仅在录制(或未)进行时</string>
     <string name="automation_condition_desc_thermal">仅在设备降频(或未降频)时</string>
     <string name="automation_condition_desc_motion_detection">仅在移动检测开启(或关闭)时</string>
+
+    <string name="settings_diagnostics_soft_restart_confirm_title">软重启推流？</string>
+    <string name="settings_diagnostics_soft_restart_confirm_body">在不杀死应用的情况下就地重连推流与相机，保持相机访问权限。</string>
+    <string name="settings_diagnostics_soft_restart_sent">已请求软重启 — 正在重连推流</string>
+    <string name="settings_diagnostics_restart_denied_exact_alarm">重启被拒绝：请在设备的应用设置中为 LensCast 授予“闹钟和提醒”权限，或改用软重启。</string>
+    <string name="settings_diagnostics_restart_failed">设备拒绝了重启请求。</string>
+    <string name="settings_diagnostics_exact_alarm_note">“重启应用”需要此设备授予“闹钟和提醒”权限；“软重启”无需该权限。</string>
+    <string name="settings_diagnostics_reset_failed">设备拒绝了相机重置请求。</string>
 </resources>

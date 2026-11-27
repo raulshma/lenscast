@@ -29,6 +29,10 @@ import com.squareup.moshi.JsonClass
 data class CommandResponse(
     val success: Boolean = true,
     val error: String? = null,
+    /** Machine-readable refusal reason (e.g. `exact_alarm_not_granted` on POST /api/system/restart). */
+    val reason: String? = null,
+    /** Human-readable guidance returned beside [reason]. */
+    val hint: String? = null,
     /** The stream URL on POST /api/stream/web|rtsp/start; null otherwise. */
     val url: String? = null,
     /** The output's running state after the action, on stream toggles. */

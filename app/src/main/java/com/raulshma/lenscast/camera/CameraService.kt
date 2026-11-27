@@ -1631,6 +1631,7 @@ class CameraService internal constructor(
             }
 
             bound.let { cam ->
+                boundFpsRange = bindFpsRange
                 // The live torch fact: observe the camera just bound. Every
                 // flip (local enableTorch, a remote writer, the re-asserted
                 // strength) republishes [torchState].
@@ -1870,6 +1871,7 @@ class CameraService internal constructor(
         imageCapture = null
         imageAnalysis = null
         liveCamera = null
+        boundFpsRange = null
         boundPhotoConfig = null
         // Unbound camera = torch dark: the live fact dies with the session,
         // and the driven strength goes with it (TorchState's KDoc).
@@ -2065,6 +2067,7 @@ class CameraService internal constructor(
 
     private var pendingResolution: Size? = null
     private var currentResolution: Size = Size(1920, 1080)
+    private var boundFpsRange: Range<Int>? = null
 
     /** The analysis stream's latest sensor-to-display rotation (degrees); the default covers the pre-first-frame bind. */
     @Volatile private var lastSensorRotationDegrees = 0
@@ -2235,10 +2238,29 @@ class CameraService internal constructor(
                 else -> Log.d(TAG, "applySettings: deferring output-rotation rebind until next active session")
             }
         }
-        if (effective.frameRate != boundSettings.frameRate) {
+        val fpsAxisChanged = effective.frameRate != boundSettings.frameRate ||
+            effective.nightVisionMode != boundSettings.nightVisionMode
+        val needsFpsRebind = if (!fpsAxisChanged) {
+            false
+        } else {
+            val currentBindFps = boundFpsRange
+            if (currentBindFps == null) {
+                effective.frameRate != boundSettings.frameRate
+            } else {
+                val nextPlan = CameraControlPlan.from(
+                    effective,
+                    _availableIsoRange.value,
+                    sensorExposureTimeRange,
+                    captureSupport,
+                )
+                Range(nextPlan.fpsLower, nextPlan.fpsUpper) != currentBindFps
+            }
+        }
+        if (needsFpsRebind) {
             // SessionConfig.setFrameRateRange is baked at bind time so a
-            // stream-config switch (e.g. 30 <-> 60 fps) re-negotiates the
-            // Camera2 session when free.
+            // stream-config or night-vision fps-range switch (e.g. 30 <-> 60
+            // or NightVision ON 15 fps <-> OFF 60 fps) re-negotiates the
+            // Camera2 session when free instead of leaving a stale session bake.
             when (
                 val action = CameraSessionArbiter.decide(
                     demandState(CameraSessionArbiter.Trigger.RebindIfFree)

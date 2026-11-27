@@ -806,4 +806,12 @@
     <string name="automation_condition_desc_recording">Uniquement pendant qu’un enregistrement est (ou n’est pas) actif</string>
     <string name="automation_condition_desc_thermal">Uniquement pendant (ou hors) bridage thermique de l’appareil</string>
     <string name="automation_condition_desc_motion_detection">Uniquement avec la détection de mouvement activée (ou désactivée)</string>
+
+    <string name="settings_diagnostics_soft_restart_confirm_title">Redémarrer les flux en douceur ?</string>
+    <string name="settings_diagnostics_soft_restart_confirm_body">Réarme les flux et la caméra sur place sans fermer l’application, en conservant l’accès à la caméra.</string>
+    <string name="settings_diagnostics_soft_restart_sent">Redémarrage léger demandé — réarmement des flux en cours</string>
+    <string name="settings_diagnostics_restart_denied_exact_alarm">Redémarrage refusé : accordez « Alarmes et rappels » à LensCast dans les paramètres de l’application sur l’appareil, ou utilisez le redémarrage léger.</string>
+    <string name="settings_diagnostics_restart_failed">Le redémarrage a été refusé par l’appareil.</string>
+    <string name="settings_diagnostics_exact_alarm_note">« Redémarrer l’app » nécessite « Alarmes et rappels » sur cet appareil ; « Redémarrage léger » fonctionne sans.</string>
+    <string name="settings_diagnostics_reset_failed">La réinitialisation de la caméra a été refusée par l’appareil.</string>
 </resources>

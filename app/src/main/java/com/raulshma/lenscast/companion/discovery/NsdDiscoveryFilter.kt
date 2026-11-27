@@ -52,6 +52,28 @@ object NsdDiscoveryFilter {
             ?.value?.trim() == LENSCAST_TXT_VALUE
 
     /**
+     * Excludes this device's own mDNS advertisement from discovery results:
+     * a resolved [host] matching any of this device's local interface
+     * addresses (or loopback) belongs to this device itself (issue #26).
+     */
+    fun isSelfService(host: String, localAddresses: Set<String>): Boolean {
+        val normalized = normalizeHost(host)
+        if (normalized.isEmpty()) return false
+        if (normalized == "127.0.0.1" || normalized.equals("::1", ignoreCase = true) ||
+            normalized.equals("0:0:0:0:0:0:0:1", ignoreCase = true)
+        ) {
+            return true
+        }
+        return localAddresses.any { normalizeHost(it).equals(normalized, ignoreCase = true) }
+    }
+
+    private fun normalizeHost(host: String): String =
+        host.trim()
+            .removePrefix("[")
+            .removeSuffix("]")
+            .substringBefore('%')
+
+    /**
      * Resolve-queue ordering hint only (never an acceptance filter — TXT
      * records arrive only after resolve). Services whose name starts with
      * `LensCast` move to the front of the sequential resolve queue so busy LANs

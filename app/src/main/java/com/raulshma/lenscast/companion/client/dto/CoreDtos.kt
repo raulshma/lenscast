@@ -193,6 +193,8 @@ data class SystemInfo(
     val processUptimeMs: Long,
     val battery: BatteryDetail,
     val storage: StorageInfo,
+    /** Null below API 31 (no exact-alarm grant model) or on older firmware. */
+    val canScheduleExactAlarms: Boolean? = null,
 )
 
 /**

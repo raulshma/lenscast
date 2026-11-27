@@ -822,4 +822,12 @@
     <string name="automation_condition_desc_recording">Только пока запись идёт (или не идёт)</string>
     <string name="automation_condition_desc_thermal">Только при наличии (или отсутствии) троттлинга</string>
     <string name="automation_condition_desc_motion_detection">Только при включённом (или выключенном) обнаружении движения</string>
+
+    <string name="settings_diagnostics_soft_restart_confirm_title">Выполнить мягкий перезапуск потоков?</string>
+    <string name="settings_diagnostics_soft_restart_confirm_body">Перезапускает потоки и камеру без закрытия приложения, сохраняя доступ к камере.</string>
+    <string name="settings_diagnostics_soft_restart_sent">Запрошен мягкий перезапуск — потоки перезапускаются</string>
+    <string name="settings_diagnostics_restart_denied_exact_alarm">Перезапуск отклонён: выдайте LensCast разрешение «Будильники и напоминания» в настройках приложения на устройстве или используйте мягкий перезапуск.</string>
+    <string name="settings_diagnostics_restart_failed">Устройство отклонило перезапуск.</string>
+    <string name="settings_diagnostics_exact_alarm_note">«Перезапустить приложение» требует разрешения «Будильники и напоминания»; «Мягкий перезапуск» работает без него.</string>
+    <string name="settings_diagnostics_reset_failed">Устройство отклонило сброс камеры.</string>
 </resources>

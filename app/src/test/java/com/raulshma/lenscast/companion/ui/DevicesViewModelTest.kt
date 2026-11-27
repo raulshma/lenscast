@@ -339,4 +339,27 @@ class DevicesViewModelTest {
         assertFalse((effect as DevicesEffect.Captured).ok)
         awaitVolleyDone(vm)
     }
+
+    @Test
+    fun `refreshIfRosterChanged reloads when a new device was persisted and skips when unchanged`() = runBlocking {
+        val vm = viewModel(CoroutineScope(coroutineContext))
+        assertEquals(DevicesUiState.Empty, vm.state.value)
+
+        // Unchanged empty roster does not re-probe.
+        vm.refreshIfRosterChanged()
+        assertEquals(DevicesUiState.Empty, vm.state.value)
+        assertEquals(0, server.requestCount)
+
+        // A newly paired device persisted by AddDeviceSheet appears after refreshIfRosterChanged.
+        server.enqueue(ok())
+        seedDevice("dev-new")
+        vm.refreshIfRosterChanged()
+
+        assertEquals(DeviceProbeStatus.ONLINE, awaitRowStatus(vm, DeviceProbeStatus.ONLINE).status)
+        assertEquals(1, server.requestCount)
+
+        // Unchanged populated roster does not re-probe either.
+        vm.refreshIfRosterChanged()
+        assertEquals(1, server.requestCount)
+    }
 }

@@ -110,4 +110,17 @@ class NsdDiscoveryFilterTest {
         assertTrue(NsdDiscoveryFilter.isPrioritizedCandidate("lenscast-pixel8._http._tcp."))
         assertFalse(NsdDiscoveryFilter.isPrioritizedCandidate("Brother HL-L2395DW"))
     }
+
+    // ── isSelfService ──
+
+    @Test
+    fun `self-service filter matches local interface addresses and loopback`() {
+        val local = setOf("192.168.1.9", "fe80::1")
+        assertTrue(NsdDiscoveryFilter.isSelfService("192.168.1.9", local))
+        assertTrue(NsdDiscoveryFilter.isSelfService("fe80::1%wlan0", local))
+        assertTrue(NsdDiscoveryFilter.isSelfService("127.0.0.1", local))
+        assertTrue(NsdDiscoveryFilter.isSelfService("::1", local))
+        assertFalse(NsdDiscoveryFilter.isSelfService("192.168.1.21", local))
+        assertFalse(NsdDiscoveryFilter.isSelfService("", local))
+    }
 }

@@ -9,6 +9,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import com.raulshma.lenscast.companion.model.DiscoveredService
+import com.raulshma.lenscast.core.NetworkUtils
 import com.raulshma.lenscast.streaming.ServiceDiscoveryManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -232,7 +233,8 @@ class NsdDiscoveryClient(private val context: Context) {
                             resolveInFlight = false
                             if (epoch == scanEpoch &&
                                 host != null &&
-                                NsdDiscoveryFilter.isLensCastService(resolved.serviceName, txt)
+                                NsdDiscoveryFilter.isLensCastService(resolved.serviceName, txt) &&
+                                !NsdDiscoveryFilter.isSelfService(host, localHostAddresses())
                             ) {
                                 recordResolvedLocked(resolved, host, txt)
                             }
@@ -264,6 +266,7 @@ class NsdDiscoveryClient(private val context: Context) {
                 val host = primaryHostAddress(updated) ?: return
                 val txt = txtRecords(updated)
                 if (!NsdDiscoveryFilter.isLensCastService(updated.serviceName, txt)) return
+                if (NsdDiscoveryFilter.isSelfService(host, localHostAddresses())) return
                 synchronized(lock) {
                     if (epoch != scanEpoch) return
                     recordResolvedLocked(updated, host, txt)
@@ -375,6 +378,9 @@ class NsdDiscoveryClient(private val context: Context) {
         }
 
     private fun hostKey(host: String, port: Int): String = "$host:$port"
+
+    private fun localHostAddresses(): Set<String> =
+        NetworkUtils.getAllLocalIpAddresses().toSet()
 
     companion object {
         private const val TAG = "NsdDiscoveryClient"

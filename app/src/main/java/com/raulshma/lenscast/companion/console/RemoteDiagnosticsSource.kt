@@ -1,10 +1,12 @@
 package com.raulshma.lenscast.companion.console
 
+import com.raulshma.lenscast.companion.client.CompanionApiException
 import com.raulshma.lenscast.companion.client.LenscastApiClient
 import com.raulshma.lenscast.companion.client.dto.LensesResponse
 import com.raulshma.lenscast.companion.client.dto.RemoteAuditEntry
 import com.raulshma.lenscast.companion.client.dto.StreamClientsInfo
 import com.raulshma.lenscast.companion.client.dto.SystemInfo
+import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -13,6 +15,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
@@ -57,6 +60,9 @@ interface SettingsDiagnostics {
 
     /** The stream client rosters (HTTP + RTSP); null until one lands. */
     val clients: StateFlow<StreamClientsInfo?>
+
+    /** Outcome of the latest maintenance action (restart / reset camera). */
+    val maintenanceStatus: StateFlow<MaintenanceStatus?>
 
     /** Whether the maintenance actions render at all (the roster's admin verdict). */
     val canManage: Boolean
@@ -107,6 +113,15 @@ data class AuditBlock(
     val exhausted: Boolean = false,
 )
 
+/** Outcome of a remote maintenance action (`restartApp` or `resetCamera`). */
+sealed interface MaintenanceStatus {
+    data class RestartSent(val soft: Boolean) : MaintenanceStatus
+    data object RestartDeniedExactAlarm : MaintenanceStatus
+    data class RestartFailed(val detail: String?) : MaintenanceStatus
+    data object ResetCameraSent : MaintenanceStatus
+    data class ResetCameraFailed(val detail: String?) : MaintenanceStatus
+}
+
 /**
  * The diagnostics seam's REMOTE backend over [LenscastApiClient]. One beat
  * polls `/api/system` + `/api/camera/lenses` + `/api/stream/clients` while a
@@ -132,6 +147,9 @@ class RemoteDiagnosticsSource(
     private val _lenses = MutableStateFlow<LensesResponse?>(null)
     private val _clients = MutableStateFlow<StreamClientsInfo?>(null)
     private val _audit = MutableStateFlow<AuditBlock?>(null)
+    private val _maintenanceStatus = MutableStateFlow<MaintenanceStatus?>(null)
+
+    override val maintenanceStatus: StateFlow<MaintenanceStatus?> = _maintenanceStatus.asStateFlow()
 
     /** Serializes kick/export/import round trips (one maintenance action at a time). */
     private val actionMutex = Mutex()
@@ -346,13 +364,24 @@ class RemoteDiagnosticsSource(
         scope.launch {
             actionMutex.withLock {
                 try {
-                    client.restartApp(if (soft) RESTART_MODE_SOFT else null)
+                    val response = client.restartApp(if (soft) RESTART_MODE_SOFT else null)
+                    _maintenanceStatus.value = when {
+                        response.success -> MaintenanceStatus.RestartSent(soft)
+                        response.reason == RESTART_REASON_EXACT_ALARM_NOT_GRANTED ->
+                            MaintenanceStatus.RestartDeniedExactAlarm
+                        else -> MaintenanceStatus.RestartFailed(
+                            response.hint ?: response.error ?: response.reason,
+                        )
+                    }
                 } catch (e: CancellationException) {
                     throw e
-                } catch (_: Exception) {
+                } catch (e: CompanionApiException) {
+                    _maintenanceStatus.value = MaintenanceStatus.RestartFailed(e.message)
+                } catch (_: IOException) {
                     // The device answers OK before its teardown; a dropped
                     // connection mid-teardown is indistinguishable from the
-                    // deep restart's socket death — nothing to reconcile.
+                    // deep restart's socket death.
+                    _maintenanceStatus.value = MaintenanceStatus.RestartSent(soft)
                 }
             }
         }
@@ -364,10 +393,18 @@ class RemoteDiagnosticsSource(
         scope.launch {
             actionMutex.withLock {
                 try {
-                    client.resetCamera()
+                    val response = client.resetCamera()
+                    _maintenanceStatus.value = if (response.success) {
+                        MaintenanceStatus.ResetCameraSent
+                    } else {
+                        MaintenanceStatus.ResetCameraFailed(
+                            response.hint ?: response.error ?: response.reason,
+                        )
+                    }
                 } catch (e: CancellationException) {
                     throw e
-                } catch (_: Exception) {
+                } catch (e: Exception) {
+                    _maintenanceStatus.value = MaintenanceStatus.ResetCameraFailed(e.message)
                 }
             }
         }
@@ -409,6 +446,9 @@ class RemoteDiagnosticsSource(
 
         /** The restart route's soft-mode query value (`?mode=soft`; absent = deep). */
         const val RESTART_MODE_SOFT = "soft"
+
+        /** Wire refusal reason when `SCHEDULE_EXACT_ALARM` is not granted on the remote device. */
+        const val RESTART_REASON_EXACT_ALARM_NOT_GRANTED = "exact_alarm_not_granted"
 
         /**
          * The audit page size — the System tab's own constant's value (four

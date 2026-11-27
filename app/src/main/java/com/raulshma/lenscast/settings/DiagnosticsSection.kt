@@ -29,6 +29,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.raulshma.lenscast.R
 import com.raulshma.lenscast.companion.client.dto.StreamClientsInfo
+import com.raulshma.lenscast.companion.console.MaintenanceStatus
 import com.raulshma.lenscast.companion.console.SettingsDiagnostics
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -113,7 +114,10 @@ fun RemoteDiagnosticsSection(
 
         // ── Maintenance: restart/reset — device-mutating, admin-only ──
         if (diagnostics.canManage) {
-            MaintenanceCard(diagnostics)
+            MaintenanceCard(
+                diagnostics = diagnostics,
+                canScheduleExactAlarms = currentInfo?.canScheduleExactAlarms,
+            )
             ConfigBackupCard(diagnostics, export)
         }
     }
@@ -195,9 +199,12 @@ private fun ClientRow(label: String, canKick: Boolean, onKick: () -> Unit = {}) 
 
 /** The restart/reset maintenance card with the tab's arm-then-confirm flow. */
 @Composable
-private fun MaintenanceCard(diagnostics: SettingsDiagnostics) {
+private fun MaintenanceCard(
+    diagnostics: SettingsDiagnostics,
+    canScheduleExactAlarms: Boolean?,
+) {
     var pendingAction by remember { mutableStateOf<MaintenanceAction?>(null) }
-    var sentNote by remember { mutableStateOf<Int?>(null) }
+    val status by diagnostics.maintenanceStatus.collectAsState()
 
     SettingsSection(title = stringResource(R.string.settings_diagnostics_maintenance_title)) {
         Row(
@@ -214,13 +221,64 @@ private fun MaintenanceCard(diagnostics: SettingsDiagnostics) {
                 Text(stringResource(R.string.settings_diagnostics_reset_camera))
             }
         }
-        sentNote?.let { res ->
-            Spacer(modifier = Modifier.height(4.dp))
+        if (canScheduleExactAlarms == false) {
+            Spacer(modifier = Modifier.height(6.dp))
             Text(
-                text = stringResource(res),
+                text = stringResource(R.string.settings_diagnostics_exact_alarm_note),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+        when (val current = status) {
+            is MaintenanceStatus.RestartSent -> {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = stringResource(
+                        if (current.soft) {
+                            R.string.settings_diagnostics_soft_restart_sent
+                        } else {
+                            R.string.settings_diagnostics_restart_sent
+                        },
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            MaintenanceStatus.RestartDeniedExactAlarm -> {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = stringResource(R.string.settings_diagnostics_restart_denied_exact_alarm),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            is MaintenanceStatus.RestartFailed -> {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = current.detail
+                        ?: stringResource(R.string.settings_diagnostics_restart_failed),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            MaintenanceStatus.ResetCameraSent -> {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = stringResource(R.string.settings_diagnostics_reset_sent),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            is MaintenanceStatus.ResetCameraFailed -> {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = current.detail
+                        ?: stringResource(R.string.settings_diagnostics_reset_failed),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            null -> Unit
         }
     }
 
@@ -240,7 +298,6 @@ private fun MaintenanceCard(diagnostics: SettingsDiagnostics) {
                         MaintenanceAction.FULL_RESTART -> diagnostics.restartApp(soft = false)
                         MaintenanceAction.RESET_CAMERA -> diagnostics.resetCamera()
                     }
-                    sentNote = pending.sentRes
                 }) {
                     Text(stringResource(R.string.companion_system_settings_dirty_save))
                 }
@@ -254,26 +311,22 @@ private fun MaintenanceCard(diagnostics: SettingsDiagnostics) {
     }
 }
 
-/** One armed maintenance action's copy (title, body, and the sent note). */
+/** One armed maintenance action's copy (title and body). */
 private enum class MaintenanceAction(
     val titleRes: Int,
     val bodyRes: Int,
-    val sentRes: Int,
 ) {
     SOFT_RESTART(
-        R.string.settings_diagnostics_restart_confirm_title,
-        R.string.settings_diagnostics_restart_confirm_body,
-        R.string.settings_diagnostics_restart_sent,
+        R.string.settings_diagnostics_soft_restart_confirm_title,
+        R.string.settings_diagnostics_soft_restart_confirm_body,
     ),
     FULL_RESTART(
         R.string.settings_diagnostics_restart_confirm_title,
         R.string.settings_diagnostics_restart_confirm_body,
-        R.string.settings_diagnostics_restart_sent,
     ),
     RESET_CAMERA(
         R.string.settings_diagnostics_reset_confirm_title,
         R.string.settings_diagnostics_reset_confirm_body,
-        R.string.settings_diagnostics_reset_sent,
     ),
 }
 

@@ -90,6 +90,7 @@ import com.raulshma.lenscast.companion.client.CertificateFingerprintProbe
 import com.raulshma.lenscast.companion.model.CompanionAuthKind
 import com.raulshma.lenscast.companion.model.DiscoveredService
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.flow.MutableStateFlow
 
 /**
@@ -111,6 +112,14 @@ fun AddDeviceSheet(
         factory = AddDeviceViewModel.Factory(app.companion),
     )
     val state by viewModel.state.collectAsStateWithLifecycle()
+
+    LaunchedEffect(viewModel) {
+        viewModel.onSheetOpened()
+    }
+
+    DisposableEffect(viewModel) {
+        onDispose { viewModel.onDismissRequested() }
+    }
 
     // Paired → hand the id up. The sheet is dismissed by the caller.
     LaunchedEffect(viewModel) {
@@ -477,6 +486,7 @@ private fun QrScanPreview(onDecoded: (String) -> Unit, modifier: Modifier = Modi
     val mainExecutor = remember { ContextCompat.getMainExecutor(context) }
 
     DisposableEffect(lifecycleOwner) {
+        val disposed = AtomicBoolean(false)
         val analysis = ImageAnalysis.Builder()
             // Modest: the QR needs ~600px of sensor, not the full stack —
             // the closest-lower-then-higher ladder absorbs odd devices.
@@ -495,9 +505,19 @@ private fun QrScanPreview(onDecoded: (String) -> Unit, modifier: Modifier = Modi
         analysis.setAnalyzer(
             executor,
             QrDecodeAnalyzer(
-                onDecoded = onDecoded,
+                onDecoded = { decoded ->
+                    if (!disposed.get()) {
+                        mainExecutor.execute {
+                            if (!disposed.get()) onDecoded(decoded)
+                        }
+                    }
+                },
                 onPreviewFrame = { bitmap ->
-                    mainExecutor.execute { frames.value = bitmap.asImageBitmap() }
+                    if (!disposed.get()) {
+                        mainExecutor.execute {
+                            if (!disposed.get()) frames.value = bitmap.asImageBitmap()
+                        }
+                    }
                 },
             ),
         )
@@ -506,8 +526,10 @@ private fun QrScanPreview(onDecoded: (String) -> Unit, modifier: Modifier = Modi
         val future = ProcessCameraProvider.getInstance(context)
         future.addListener(
             {
+                if (disposed.get()) return@addListener
                 try {
                     provider = future.get()
+                    if (disposed.get()) return@addListener
                     provider?.unbindAll()
                     // Analysis only — no Preview use case, no output surface
                     // for the sheet's window to mis-composite (see KDoc).
@@ -524,12 +546,13 @@ private fun QrScanPreview(onDecoded: (String) -> Unit, modifier: Modifier = Modi
             mainExecutor,
         )
         onDispose {
+            disposed.set(true)
+            analysis.clearAnalyzer()
             try {
                 provider?.unbindAll()
             } catch (e: Exception) {
                 // The provider can already be gone during teardown.
             }
-            analysis.clearAnalyzer()
             executor.shutdown()
         }
     }
@@ -637,21 +660,33 @@ internal class QrDecodeAnalyzer(
         val now = android.os.SystemClock.elapsedRealtime()
         if (now < nextPreviewAtMs) return
         nextPreviewAtMs = now + QR_PREVIEW_INTERVAL_MS
+        var rawBitmap: Bitmap? = null
+        var upright: Bitmap? = null
+        var delivered = false
         try {
-            val bitmap = image.toBitmap()
+            rawBitmap = image.toBitmap()
             val rotation = image.imageInfo.rotationDegrees
-            val upright = if (rotation != 0) {
+            upright = if (rotation != 0) {
                 val matrix = android.graphics.Matrix()
                     .apply { postRotate(rotation.toFloat()) }
-                Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, false)
+                Bitmap.createBitmap(rawBitmap, 0, 0, rawBitmap.width, rawBitmap.height, matrix, false)
             } else {
-                bitmap
+                rawBitmap
             }
             val width = QR_PREVIEW_WIDTH
             val height = maxOf(1, upright.height * width / upright.width)
-            onPreviewFrame(Bitmap.createScaledBitmap(upright, width, height, true))
+            val scaled = Bitmap.createScaledBitmap(upright, width, height, true)
+            if (upright !== rawBitmap) rawBitmap.recycle()
+            if (scaled !== upright) upright.recycle()
+            delivered = true
+            onPreviewFrame(scaled)
         } catch (e: Exception) {
             // A malformed frame loses one preview tick, never the decode.
+        } finally {
+            if (!delivered) {
+                if (upright != null && upright !== rawBitmap && !upright.isRecycled) upright.recycle()
+                if (rawBitmap != null && !rawBitmap.isRecycled) rawBitmap.recycle()
+            }
         }
     }
 
@@ -737,7 +772,9 @@ private fun DiscoverPane(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                if (scanning) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                }
                 Text(
                     text = stringResource(
                         if (scanning) {

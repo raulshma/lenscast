@@ -803,4 +803,12 @@
     <string name="automation_condition_desc_recording">Nur während eine Aufnahme läuft (bzw. nicht läuft)</string>
     <string name="automation_condition_desc_thermal">Nur bei (bzw. ohne) thermischer Drosselung</string>
     <string name="automation_condition_desc_motion_detection">Nur bei ein- (bzw. aus-)geschalteter Bewegungserkennung</string>
+
+    <string name="settings_diagnostics_soft_restart_confirm_title">Streams per Soft-Neustart neu starten?</string>
+    <string name="settings_diagnostics_soft_restart_confirm_body">Startet Streams und Kamera direkt neu, ohne die App zu beenden, sodass der Kamerazugriff erhalten bleibt.</string>
+    <string name="settings_diagnostics_soft_restart_sent">Soft-Neustart angefordert — Streams werden neu gestartet</string>
+    <string name="settings_diagnostics_restart_denied_exact_alarm">Neustart abgelehnt: Erteile LensCast in den App-Einstellungen des Geräts „Wecker &amp; Erinnerungen“ oder nutze Soft-Neustart.</string>
+    <string name="settings_diagnostics_restart_failed">Neustart wurde vom Gerät abgelehnt.</string>
+    <string name="settings_diagnostics_exact_alarm_note">„App neu starten“ erfordert auf diesem Gerät „Wecker &amp; Erinnerungen“; „Soft-Neustart“ funktioniert ohne.</string>
+    <string name="settings_diagnostics_reset_failed">Kamera-Reset wurde vom Gerät abgelehnt.</string>
 </resources>

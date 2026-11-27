@@ -804,4 +804,12 @@
     <string name="automation_condition_desc_recording">Solo mientras hay (o no hay) una grabación activa</string>
     <string name="automation_condition_desc_thermal">Solo mientras el dispositivo está (o no está) limitando el rendimiento</string>
     <string name="automation_condition_desc_motion_detection">Solo con la detección de movimiento activada (o desactivada)</string>
+
+    <string name="settings_diagnostics_soft_restart_confirm_title">¿Reiniciar transmisiones suavemente?</string>
+    <string name="settings_diagnostics_soft_restart_confirm_body">Reactiva las transmisiones y la cámara sin cerrar la app, conservando el acceso a la cámara.</string>
+    <string name="settings_diagnostics_soft_restart_sent">Reinicio suave solicitado: las transmisiones se están reactivando</string>
+    <string name="settings_diagnostics_restart_denied_exact_alarm">Reinicio rechazado: concede «Alarmas y recordatorios» a LensCast en los ajustes de la app del dispositivo o usa Reinicio suave.</string>
+    <string name="settings_diagnostics_restart_failed">El dispositivo rechazó el reinicio.</string>
+    <string name="settings_diagnostics_exact_alarm_note">«Reiniciar app» requiere «Alarmas y recordatorios» en este dispositivo; «Reinicio suave» funciona sin ello.</string>
+    <string name="settings_diagnostics_reset_failed">El dispositivo rechazó el restablecimiento de la cámara.</string>
 </resources>

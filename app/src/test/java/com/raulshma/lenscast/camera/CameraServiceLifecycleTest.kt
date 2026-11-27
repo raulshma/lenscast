@@ -12,6 +12,7 @@ import com.raulshma.lenscast.camera.model.CameraErrorPolicy
 import com.raulshma.lenscast.camera.model.CameraSettings
 import com.raulshma.lenscast.camera.model.CameraState
 import com.raulshma.lenscast.camera.model.CaptureSupport
+import com.raulshma.lenscast.camera.model.NightVisionMode
 import com.raulshma.lenscast.camera.model.SessionDemand
 import io.mockk.every
 import io.mockk.mockk
@@ -247,5 +248,52 @@ class CameraServiceLifecycleTest {
         assertTrue(bound)
         assertEquals(CameraState.Ready, fixture.service.cameraState.value)
         assertTrue(attempts >= 2)
+    }
+
+    @Test
+    fun `applySettings rebinds SessionConfig when nightVisionMode toggles off at 60 fps`() {
+        fixture.service.acquireKeepAlive()
+        fixture.setCaptureSupport(
+            CaptureSupport(
+                targetFpsRanges = setOf(
+                    CaptureSupport.FpsRange(15, 15),
+                    CaptureSupport.FpsRange(30, 30),
+                    CaptureSupport.FpsRange(30, 60),
+                ),
+            ),
+        )
+
+        // Bind initially with NightVisionMode.ON at 60 fps → SessionConfig baked to [15, 15].
+        applyOffMain(CameraSettings(frameRate = 60, nightVisionMode = NightVisionMode.ON))
+        assertEquals(1, fixture.sessionConfigs.size)
+        assertEquals(Range(15, 15), fixture.sessionConfigs.last().frameRateRange)
+
+        // Turning NightVisionMode.OFF keeps frameRate=60, so SessionConfig must rebind to [30, 60].
+        applyOffMain(CameraSettings(frameRate = 60, nightVisionMode = NightVisionMode.OFF))
+        assertEquals(2, fixture.sessionConfigs.size)
+        assertEquals(Range(30, 60), fixture.sessionConfigs.last().frameRateRange)
+        shadowOf(Looper.getMainLooper()).idle()
+    }
+
+    @Test
+    fun `applySettings skips SessionConfig rebind when nightVisionMode flip keeps the same fps range`() {
+        fixture.service.acquireKeepAlive()
+        fixture.setCaptureSupport(
+            CaptureSupport(
+                targetFpsRanges = setOf(
+                    CaptureSupport.FpsRange(15, 15),
+                    CaptureSupport.FpsRange(30, 30),
+                ),
+            ),
+        )
+
+        applyOffMain(CameraSettings(frameRate = 15, nightVisionMode = NightVisionMode.ON))
+        assertEquals(1, fixture.sessionConfigs.size)
+        assertEquals(Range(15, 15), fixture.sessionConfigs.last().frameRateRange)
+
+        // At 15 fps, OFF also resolves to [15, 15] — no redundant SessionConfig rebind needed.
+        applyOffMain(CameraSettings(frameRate = 15, nightVisionMode = NightVisionMode.OFF))
+        assertEquals(1, fixture.sessionConfigs.size)
+        shadowOf(Looper.getMainLooper()).idle()
     }
 }

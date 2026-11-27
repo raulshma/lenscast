@@ -387,4 +387,28 @@ class RemoteDiagnosticsSourceTest {
             parent.cancel()
         }
     }
+
+    @Test
+    fun `restartApp surfaces exact_alarm_not_granted refusal in maintenanceStatus`() = runBlocking {
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                requests.add("${request.method} ${request.path.orEmpty()}")
+                val path = request.path.orEmpty().substringBefore('?')
+                return when {
+                    request.method == "POST" && path == "/api/system/restart" ->
+                        ok("""{"success":false,"reason":"exact_alarm_not_granted","hint":"Grant Alarms & reminders"}""")
+                    else -> ok("{}")
+                }
+            }
+        }
+        val parent = Job()
+        val src = source(parent)
+        try {
+            src.restartApp(soft = false)
+            val status = withTimeout(5_000) { src.maintenanceStatus.first { it != null } }
+            assertEquals(MaintenanceStatus.RestartDeniedExactAlarm, status)
+        } finally {
+            parent.cancel()
+        }
+    }
 }

@@ -97,17 +97,18 @@ class PairingFlowTest {
         fingerprintProbe: suspend (String) -> CertificateFingerprintProbe.Result = {
             CertificateFingerprintProbe.Result.Unreachable(IllegalStateException("no probe in this test"))
         },
+        discovery: DiscoveryHandle = DiscoveryHandle(
+            kotlinx.coroutines.flow.flowOf(emptyList()),
+            start = {},
+            stop = {},
+        ),
     ): AddDeviceViewModel = AddDeviceViewModel(
         roster = roster,
         credentials = credentials,
         // A FINITE flow: the VM's init launches a results collector as a
         // child of the caller's job — an infinite (MutableStateFlow) source
         // would keep runBlocking parked on it forever after the test body.
-        discovery = DiscoveryHandle(
-            kotlinx.coroutines.flow.flowOf(emptyList()),
-            start = {},
-            stop = {},
-        ),
+        discovery = discovery,
         fingerprintProbe = fingerprintProbe,
         scope = scope,
         newId = { "pair-1" },
@@ -483,5 +484,71 @@ class PairingFlowTest {
         assertEquals("192.168.1.7", editing.form.host)
         assertEquals("8080", editing.form.port)
         assertEquals("LensCast-Pixel8", editing.form.name)
+    }
+
+    @Test
+    fun `reopening sheet in DISCOVER mode restarts discovery after outside dismiss`() = runBlocking {
+        var starts = 0
+        var stops = 0
+        val vm = viewModel(
+            CoroutineScope(coroutineContext),
+            discovery = DiscoveryHandle(
+                kotlinx.coroutines.flow.flowOf(emptyList()),
+                start = { starts++ },
+                stop = { stops++ },
+            ),
+        )
+
+        vm.onSheetOpened()
+        assertEquals(0, starts)
+
+        vm.onModeChanged(AddDeviceMode.DISCOVER)
+        assertEquals(1, starts)
+
+        vm.onDismissRequested()
+        assertEquals(1, stops)
+
+        // Reopen while still in DISCOVER mode: radar must restart without switching tabs.
+        vm.onSheetOpened()
+        assertEquals(2, starts)
+        val state = vm.state.value as AddDeviceUiState.Editing
+        assertEquals(AddDeviceMode.DISCOVER, state.mode)
+        assertTrue(state.scanning)
+    }
+
+    @Test
+    fun `reopening sheet after Saved resets to fresh SCAN Editing state`() = runBlocking {
+        server.enqueue(ok("""{"required":false}"""))
+        server.enqueue(ok(statusJson))
+
+        val vm = viewModel(CoroutineScope(coroutineContext))
+        editManual(vm, basicForm())
+        vm.onTestClicked()
+        awaitTested(vm)
+
+        vm.onSaveClicked()
+        awaitSaved(vm)
+
+        // Returning to Devices and tapping Add device again must reset Saved -> Editing(SCAN).
+        vm.onSheetOpened()
+        val reset = vm.state.value as AddDeviceUiState.Editing
+        assertEquals(AddDeviceMode.SCAN, reset.mode)
+        assertEquals(PairingForm(), reset.form)
+    }
+
+    @Test
+    fun `dismissing during ConfirmTofu reverts state back to Editing`() = runBlocking {
+        val vm = viewModel(
+            CoroutineScope(coroutineContext),
+            fingerprintProbe = { CertificateFingerprintProbe.Result.Digest("a".repeat(64)) },
+        )
+        editManual(vm, basicForm().copy(useTls = true, tlsFingerprint = ""))
+        vm.onTestClicked()
+        awaitState(vm) { it is AddDeviceUiState.ConfirmTofu }
+
+        vm.onDismissRequested()
+
+        val state = awaitState(vm) { it is AddDeviceUiState.Editing } as AddDeviceUiState.Editing
+        assertEquals(AddDeviceMode.MANUAL, state.mode)
     }
 }

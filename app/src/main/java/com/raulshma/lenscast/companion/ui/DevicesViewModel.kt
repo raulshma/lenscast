@@ -164,6 +164,23 @@ class DevicesViewModel(
     }
 
     /**
+     * Re-reads the roster and refreshes only if its membership drifted from
+     * what this ViewModel currently holds (e.g. returning after pairing a new
+     * device without destroying the ViewModel).
+     */
+    fun refreshIfRosterChanged() {
+        val currentIds: List<String> = when (val current = _state.value) {
+            DevicesUiState.Loading -> return
+            DevicesUiState.Empty -> emptyList()
+            is DevicesUiState.Ready -> current.rows.map { it.device.id }
+        }
+        val persistedIds = roster.all().map { it.id }
+        if (persistedIds != currentIds) {
+            refresh()
+        }
+    }
+
+    /**
      * Removes one device end-to-end: the roster entry, its encrypted
      * credentials, and any cached session — then confirms via effect.
      */
