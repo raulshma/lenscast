@@ -311,6 +311,7 @@ html, body {
   align-items: center;
   justify-content: center;
   position: relative;
+  isolation: isolate;
   min-height: 0;
   border: 1px solid var(--lc-border);
   transition: border-color 0.4s ease, box-shadow 0.4s ease;
@@ -704,6 +705,8 @@ html, body {
 }
 
 .preview-img {
+  position: relative;
+  z-index: 0;
   width: 100%;
   height: 100%;
   object-fit: contain;
@@ -955,6 +958,8 @@ html, body {
 
 /* Preview Actions */
 .preview-actions {
+  position: relative;
+  z-index: 10;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -964,6 +969,8 @@ html, body {
 }
 
 .preview-actions-left {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -971,6 +978,8 @@ html, body {
 }
 
 .preview-actions-right {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
 }

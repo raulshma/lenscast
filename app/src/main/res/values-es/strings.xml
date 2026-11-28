@@ -585,6 +585,7 @@
     <string name="automation_param_motion">Detección de movimiento</string>
     <string name="automation_param_sound">Detección de sonido</string>
     <string name="automation_param_enabled">Activado</string>
+    <string name="automation_param_type_value">Escribir un valor</string>
     <string name="automation_summary_torch_on">Linterna encendida</string>
     <string name="automation_summary_torch_off">Linterna apagada</string>
     <string name="automation_summary_torch_strength">Intensidad de linterna %1$s</string>
@@ -618,6 +619,7 @@
     <string name="automation_trigger_motion">Movimiento detectado</string>
     <string name="automation_trigger_sound">Sonido detectado</string>
     <string name="automation_trigger_tamper">Manipulación (corte de corriente)</string>
+    <string name="automation_trigger_illuminance">Cruce de luz ambiental</string>
     <string name="automation_trigger_charging">Conexión / desconexión del cargador</string>
     <string name="automation_trigger_battery">Umbral de batería</string>
     <string name="automation_trigger_streaming">Inicio / parada de transmisión</string>
@@ -626,6 +628,8 @@
     <string name="automation_summary_trigger_motion">Cuando se detecte movimiento</string>
     <string name="automation_summary_trigger_sound">Cuando se detecte sonido</string>
     <string name="automation_summary_trigger_tamper">Al detectar manipulación (corte de corriente)</string>
+    <string name="automation_summary_trigger_illuminance_below">Cuando la luz baje a %1$s lux</string>
+    <string name="automation_summary_trigger_illuminance_above">Cuando la luz supere %1$s lux</string>
     <string name="automation_summary_trigger_charging_on">Cuando se conecte el cargador</string>
     <string name="automation_summary_trigger_charging_off">Cuando se desconecte el cargador</string>
     <string name="automation_summary_trigger_battery_below">Cuando la batería baje al %1$s%%</string>
@@ -639,6 +643,7 @@
     <!-- Parámetros de disparadores -->
     <string name="automation_param_battery_threshold">Nivel de batería (%)</string>
     <string name="automation_param_when_below">Al bajar</string>
+    <string name="automation_param_lux_threshold">Nivel de luz (lux)</string>
     <string name="automation_param_charging_plugged">Cargando</string>
     <string name="automation_param_streaming_active">Transmisión</string>
     <string name="automation_param_viewers_connected">Espectador presente</string>
@@ -647,6 +652,7 @@
     <string name="automation_condition_time_window">Franja horaria</string>
     <string name="automation_condition_charging">Estado de carga</string>
     <string name="automation_condition_battery">Nivel de batería</string>
+    <string name="automation_condition_illuminance">Luz ambiental</string>
     <string name="automation_condition_power_save">Ahorro de energía</string>
     <string name="automation_condition_wifi">Wi-Fi conectado</string>
     <string name="automation_condition_streaming">Transmisión activa</string>
@@ -660,6 +666,8 @@
     <string name="automation_param_window_days">Días</string>
     <string name="automation_param_battery_min">Mínimo (%)</string>
     <string name="automation_param_battery_max">Máximo (%)</string>
+    <string name="automation_param_lux_min">Mínimo (lux)</string>
+    <string name="automation_param_lux_max">Máximo (lux)</string>
     <string name="automation_param_power_save_on">Ahorro de energía activado</string>
     <string name="automation_param_wifi_connected">Conectado</string>
     <string name="automation_param_viewers_min">Mínimo de espectadores</string>
@@ -674,6 +682,10 @@
     <string name="automation_summary_condition_battery_min">Batería ≥ %1$s%%</string>
     <string name="automation_summary_condition_battery_max">Batería ≤ %1$s%%</string>
     <string name="automation_summary_condition_battery_any">Batería: cualquier nivel</string>
+    <string name="automation_summary_condition_illuminance_between">Luz ambiental %1$s–%2$s lux</string>
+    <string name="automation_summary_condition_illuminance_min">Luz ambiental ≥ %1$s lux</string>
+    <string name="automation_summary_condition_illuminance_max">Luz ambiental ≤ %1$s lux</string>
+    <string name="automation_summary_condition_illuminance_any">Luz ambiental: cualquier nivel</string>
     <string name="automation_summary_condition_power_save_on">Con el ahorro de energía activado</string>
     <string name="automation_summary_condition_power_save_off">Con el ahorro de energía desactivado</string>
     <string name="automation_summary_condition_wifi_on">Con Wi-Fi conectado</string>
@@ -710,6 +722,11 @@
     <string name="automation_missed_window">Dentro de una ventana</string>
     <string name="automation_editor_missed_window">Ventana de recuperación</string>
     <string name="automation_editor_window_wrap_hint">Una franja que cruza la medianoche (desde &gt; hasta) continúa al día siguiente</string>
+
+    <!-- Editor de automatización: lectura en vivo de la luz ambiental junto a un disparador o condición en lux -->
+    <string name="automation_illuminance_now">Luz ambiental actual: %1$s lux</string>
+    <string name="automation_illuminance_unavailable">No hay ningún sensor de luz ambiental disponible.</string>
+    <string name="automation_illuminance_waiting">Esperando una lectura de luz…</string>
 
     <!-- Automatización: tarjeta del motor, tarjetas de reglas, estado vacío -->
     <string name="automation_master_section_title">Motor</string>
@@ -772,6 +789,7 @@
     <string name="automation_trigger_desc_motion">Se activa cuando el detector de movimiento ve movimiento</string>
     <string name="automation_trigger_desc_sound">Se activa cuando el detector de sonido oye un ruido</string>
     <string name="automation_trigger_desc_tamper">Se activa cuando salta la detección de manipulación (corte de corriente)</string>
+    <string name="automation_trigger_desc_illuminance">Se activa cuando la luz ambiente cruza un umbral de lux</string>
     <string name="automation_trigger_desc_charging">Se activa al conectar o desconectar el cargador</string>
     <string name="automation_trigger_desc_battery">Se activa cuando la batería cruza un nivel elegido</string>
     <string name="automation_trigger_desc_streaming">Se activa cuando el stream empieza o se detiene</string>
@@ -794,6 +812,7 @@
 
     <!-- Automatización: descripciones del selector, condiciones -->
     <string name="automation_condition_desc_time_window">Solo dentro de una franja diaria, opcionalmente en días elegidos</string>
+    <string name="automation_condition_desc_illuminance">Solo mientras la luz ambiente esté dentro de un rango de lux</string>
     <string name="automation_condition_desc_charging">Solo con el cargador conectado (o desconectado)</string>
     <string name="automation_condition_desc_battery">Solo mientras la batería está por encima y/o por debajo de un nivel</string>
     <string name="automation_condition_desc_power_save">Solo con el ahorro de energía activado (o desactivado)</string>

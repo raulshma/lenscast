@@ -71,6 +71,26 @@ class SseClientPumpTest {
     }
 
     @Test
+    fun `client count callbacks track opens closes and transport teardown`() {
+        val counts = mutableListOf<Int>()
+        val pump = SseClientPump(
+            writerThreadName = "t",
+            onClientCountChanged = { counts.add(it) },
+        )
+        val firstGate = CountDownLatch(1)
+        val secondGate = CountDownLatch(1)
+        val first = openLiveSession(pump, firstGate)
+        openLiveSession(pump, secondGate)
+
+        first.close()
+        pump.closeAll()
+        firstGate.countDown()
+        secondGate.countDown()
+
+        assertEquals(listOf(1, 2, 1, 0), counts)
+    }
+
+    @Test
     fun `closing one client frees its cap slot`() {
         val pump = SseClientPump(writerThreadName = "t", maxClients = 2)
         val gate = CountDownLatch(1)

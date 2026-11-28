@@ -7,6 +7,7 @@ import com.raulshma.lenscast.automation.schedule.AutomationSensorSnapshotProvide
 import com.raulshma.lenscast.capture.DetectionEventStore
 import com.raulshma.lenscast.capture.RecordingController
 import com.raulshma.lenscast.camera.CameraService
+import com.raulshma.lenscast.camera.LightSensorMonitor
 import com.raulshma.lenscast.core.EventKind
 import com.raulshma.lenscast.core.PowerManager
 import com.raulshma.lenscast.core.ThermalMonitor
@@ -35,6 +36,7 @@ class AutomationSnapshotProvider(
     private val cameraService: CameraService,
     private val recordingController: RecordingController,
     private val settingsDataStore: SettingsDataStore,
+    private val lightSensorMonitor: LightSensorMonitor,
 ) : AutomationSensorSnapshotProvider {
 
     override suspend fun snapshot(): AutomationSensorSnapshot =
@@ -50,6 +52,7 @@ class AutomationSnapshotProvider(
             recordingActive = recordingController.isRecording.value,
             thermalNormal = thermalMonitor.thermalState.value == ThermalState.NORMAL,
             motionDetectionEnabled = settingsDataStore.motionDetectionEnabled.value,
+            illuminanceLux = lightSensorMonitor.illuminanceLux.value,
         )
 }
 
@@ -76,6 +79,7 @@ class AutomationEventWiring(
     private val detectionEventStore: DetectionEventStore,
     private val powerManager: PowerManager,
     private val streamingManager: StreamingManager,
+    private val lightSensorMonitor: LightSensorMonitor,
     private val scope: CoroutineScope,
 ) {
 
@@ -88,6 +92,7 @@ class AutomationEventWiring(
         watchDetectionEvents()
         watchCharging()
         watchBatteryLevel()
+        watchIlluminance()
         watchStreaming()
         watchViewers()
     }
@@ -134,6 +139,31 @@ class AutomationEventWiring(
                     scheduler.onEvent(AutomationEvent.BatteryLevelChanged(lastLevel, level))
                 }
                 if (level != null) lastLevel = level
+            }
+            .launchIn(scope)
+    }
+
+    /**
+     * Illuminance changes (integer lux) for threshold-crossing rules.
+     *
+     * Unlike [watchBatteryLevel], a null reading RESETS the baseline — the
+     * deliberate half of the illuminance trigger's first-sample rule
+     * ([AutomationSchedulePolicy.triggerMatches]). The light sensor is
+     * demand-gated and publishes null whenever its last gate closes, so the
+     * next reading is always a first sample and reaches the scheduler as
+     * `IlluminanceChanged(null, lux)`: restarting into darkness, or
+     * switching the automation back on in darkness, re-fires "light drops
+     * below" with no crossing. The battery flow never publishes null after
+     * its first level, so its twin keeps the last level as the baseline.
+     */
+    private fun watchIlluminance() {
+        var lastLux: Int? = lightSensorMonitor.illuminanceLux.value
+        lightSensorMonitor.illuminanceLux
+            .onEach { lux ->
+                if (lux != null && lux != lastLux) {
+                    scheduler.onEvent(AutomationEvent.IlluminanceChanged(lastLux, lux))
+                }
+                lastLux = lux
             }
             .launchIn(scope)
     }

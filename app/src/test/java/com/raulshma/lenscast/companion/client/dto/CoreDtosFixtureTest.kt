@@ -73,6 +73,8 @@ class CoreDtosFixtureTest {
         assertEquals(3, status.watchdog?.totalRecoveries)
         assertEquals("Encoder stalled; pipeline restarted", status.watchdog?.lastFailureReason)
         assertEquals(2_000_000, status.encodedVideoBitrate)
+        assertEquals(320, status.illuminanceLux)
+        assertEquals(true, status.lightSensorAvailable)
     }
 
     @Test
@@ -239,5 +241,9 @@ class CoreDtosFixtureTest {
         assertNull(status.streaming.whepClients)
         assertNull(status.streaming.srtEnabled)
         assertNull(status.watchdog)
+        // The lux pair folds to null too — null sensor verdict reads "no
+        // answer", never "no sensor", on a device that predates the fields.
+        assertNull(status.illuminanceLux)
+        assertNull(status.lightSensorAvailable)
     }
 }

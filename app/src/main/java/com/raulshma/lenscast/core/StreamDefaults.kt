@@ -135,6 +135,11 @@ object StreamDefaults {
     const val SOUND_THRESHOLD_MAX = 100
     const val SOUND_THRESHOLD_PERCENT_DEFAULT = 30
 
+    // Ambient illuminance shared by the light sensor, overlay and automation.
+    const val LIGHT_SENSOR_MIN_LUX = 0
+    const val LIGHT_SENSOR_MAX_LUX = 100_000
+    const val LIGHT_SENSOR_TRIGGER_DEFAULT_LUX = 100
+
     // Adaptive sound noise floor: the trigger threshold rides above a slow
     // exponential moving average of the measured RMS, so a constant ambient
     // (HVAC, traffic) stops masking or tripping the detector.

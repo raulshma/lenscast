@@ -1,7 +1,8 @@
 import { Show } from 'solid-js'
-import type { OverlayPosition, StreamingSettings } from '../../../../../types'
+import type { DeviceStatus, OverlayPosition, StreamingSettings } from '../../../../../types'
 import { OVERLAY_POSITION_LABELS } from '../../../../../types'
 import { t } from '../../../../../lib/i18n'
+import { illuminanceLuxValue, illuminanceUnavailable } from '../../../../../lib/illuminance'
 import { Panel, FieldRow, ToggleField, Select, TextInput, SliderField, Led } from '../../../ui'
 import { SettingItem, useInspectorSection } from '../../../ui/SettingItem'
 
@@ -15,6 +16,7 @@ const POS_KEYS: Record<OverlayPosition, string> = {
 
 interface Props {
   streaming: () => StreamingSettings
+  status: () => DeviceStatus | null
   onUpdate: (patch: Partial<StreamingSettings>) => void
 }
 
@@ -25,6 +27,8 @@ export default function OverlayPanel(props: Props) {
     if (!readOnly()) props.onUpdate(patch)
   }
   const s = () => props.streaming()
+  const lux = () => illuminanceLuxValue(props.status())
+  const unavailable = () => illuminanceUnavailable(props.status())
 
   return (
     <Panel
@@ -95,6 +99,32 @@ export default function OverlayPanel(props: Props) {
           checked={s().showStatus}
           onChange={(v) => update({ showStatus: v })}
         />
+        </SettingItem>
+
+        <SettingItem id="overlay.illuminance">
+        <>
+        <ToggleField
+          disabled={readOnly()}
+          label={t('overlay.illuminance')}
+          checked={s().showIlluminance ?? false}
+          onChange={(v) => update({ showIlluminance: v })}
+        />
+        <Show
+          when={lux() != null}
+          fallback={
+            <Show
+              when={unavailable()}
+              fallback={<div class="nx-field-hint" role="status" aria-live="polite">{t('overlay.illuminanceWaiting')}</div>}
+            >
+              <div class="nx-banner nx-banner-neutral" role="note">{t('overlay.illuminanceUnavailable')}</div>
+            </Show>
+          }
+        >
+          <div class="nx-field-hint" role="status" aria-live="polite">
+            {t('overlay.illuminanceValue', { value: lux()! })}
+          </div>
+        </Show>
+        </>
         </SettingItem>
 
         <SettingItem id="overlay.customText">

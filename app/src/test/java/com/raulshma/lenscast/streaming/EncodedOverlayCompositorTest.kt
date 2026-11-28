@@ -169,6 +169,22 @@ class EncodedOverlayCompositorTest {
     }
 
     @Test
+    fun `an illuminance change re-renders the cached strip`() {
+        val rasterizer = FakeRasterizer()
+        var lux: Int? = 100
+        val compositor = EncodedOverlayCompositor(rasterizer) { lux }
+        compositor.setOverlaySettings(OverlaySettings(enabled = true, showIlluminance = true))
+
+        compositor.applyTo(nv21Frame(64, 64), 64, 64, nowMs = 0)
+        compositor.applyTo(nv21Frame(64, 64), 64, 64, nowMs = 500)
+        assertEquals(1, rasterizer.renderCount)
+
+        lux = 200
+        compositor.applyTo(nv21Frame(64, 64), 64, 64, nowMs = 500)
+        assertEquals(2, rasterizer.renderCount)
+    }
+
+    @Test
     fun `a settings swap re-renders even when the lines are identical`() {
         val rasterizer = FakeRasterizer()
         val compositor = EncodedOverlayCompositor(rasterizer)

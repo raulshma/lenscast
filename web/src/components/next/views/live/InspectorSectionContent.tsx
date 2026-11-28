@@ -117,7 +117,11 @@ export default function InspectorSectionContent(props: Props): JSX.Element {
     case 'overlay':
       return (
         <Show when={state.settings()?.streaming}>
-          <OverlayPanel streaming={() => state.settings()!.streaming} onUpdate={state.updateStreamingDebounced} />
+          <OverlayPanel
+            streaming={() => state.settings()!.streaming}
+            status={state.status}
+            onUpdate={state.updateStreamingDebounced}
+          />
         </Show>
       )
     case 'privacy-masking':

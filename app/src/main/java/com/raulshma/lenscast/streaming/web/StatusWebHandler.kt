@@ -3,6 +3,7 @@ package com.raulshma.lenscast.streaming.web
 import com.raulshma.lenscast.core.AppJson
 import com.raulshma.lenscast.camera.CameraService
 import com.raulshma.lenscast.camera.LensInventory
+import com.raulshma.lenscast.camera.LightSensorMonitor
 import com.raulshma.lenscast.core.PowerManager
 import com.raulshma.lenscast.core.StreamWatchdog
 import com.raulshma.lenscast.core.ThermalMonitor
@@ -21,11 +22,23 @@ class StatusWebHandler(
     private val cameraService: CameraService,
     private val streamWatchdog: StreamWatchdog,
     private val settingsDataStore: SettingsDataStore,
+    private val lightSensorMonitor: LightSensorMonitor,
+    /** Invoked per served status — the light-sensor demand pulse for plain pollers. */
+    private val onStatusServed: () -> Unit = {},
 ) {
 
     private val responseAdapter by lazy { AppJson.moshi.adapter(StatusResponseDto::class.java) }
 
     suspend fun get(): String {
+        // A plain GET /api/status holds no SSE session, so the dashboard
+        // client count never rises for a poller. Arm one demand pulse
+        // before reading: the first poll after an idle period wakes the
+        // sensor (its own answer is still null — registration is
+        // asynchronous and the first reading is debounced), and every poll
+        // inside the pulse TTL then reads the live sample instead of a
+        // permanently-unsampled null (the SSE ticks that share this builder
+        // re-arm it harmlessly — their clients hold the gate open anyway).
+        onStatusServed()
         val adaptiveState = streamingManager.adaptiveBitrateState.value
         val networkStats = streamingManager.getNetworkStatsSnapshot()
         val firstClientKey = networkStats.clientDetails.keys.firstOrNull()
@@ -143,6 +156,8 @@ class StatusWebHandler(
             },
             sirenActive = streamingManager.sirenController().isRunning(),
             cameraBlockedByLock = streamingManager.isCameraBlockedByLock(),
+            illuminanceLux = lightSensorMonitor.illuminanceLux.value,
+            lightSensorAvailable = lightSensorMonitor.sensorAvailable,
         )
         return responseAdapter.toJson(response)
     }

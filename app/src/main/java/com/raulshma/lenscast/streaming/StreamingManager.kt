@@ -71,6 +71,7 @@ class StreamingManager(
     // read without re-entering its lazy — the manager hands itself over,
     // exactly the `this` capture the builder always relied on.
     private val webApiStackFactory: (StreamingManager) -> WebApiStack,
+    private val illuminance: () -> Int? = { null },
 ) : StreamFacts {
 
     private val audioStreamingManager = AudioStreamingManager(context)
@@ -137,6 +138,7 @@ class StreamingManager(
         },
         // The low-res sub-stream's fan-out onto the RTSP server's /sub URL.
         subVideoSink = { nalUnits -> rtspOutput.feedEncodedSubVideo(nalUnits) },
+        overlayCompositor = EncodedOverlayCompositor(illuminanceProvider = illuminance),
     )
 
     /** The sink-activity snapshot the hub's policy verdicts read. */
@@ -250,7 +252,7 @@ class StreamingManager(
     // construction (audio on only when the shared capture is free). Its
     // settle epilogue is the streaming-state mirror only — no hub refresh,
     // exactly what the WHIP scaffolding ran before the collapse.
-    private val whipOverlayCompositor = EncodedOverlayCompositor()
+    private val whipOverlayCompositor = EncodedOverlayCompositor(illuminanceProvider = illuminance)
     private val whipOutput: WhipOutput = WhipOutput(
         audioAllowed = ::whipAudioAllowed,
         onStatusChanged = { status -> _whipStatus.value = status },
@@ -277,6 +279,7 @@ class StreamingManager(
             context = context,
             stunServer = { whipStunSetting },
             audioAllowed = ::whipAudioAllowed,
+            illuminance = illuminance,
         )
 
     private val serviceDiscoveryManager = ServiceDiscoveryManager(context)
@@ -314,7 +317,7 @@ class StreamingManager(
 
     private val adaptiveBitrateController = AdaptiveBitrateController(networkQualityMonitor)
     private val qualityPolicy = StreamQualityPolicy(thermalMonitor, adaptiveBitrateController)
-    private val framePipeline = FramePipeline(qualityPolicy)
+    private val framePipeline = FramePipeline(qualityPolicy, illuminance)
 
     private class TapFrame(
         val yuvData: ByteArray,
@@ -451,7 +454,7 @@ class StreamingManager(
     // The no-viewer fallback for the same snapshot source: a retained camera
     // frame copied at ~1 Hz, encoded on demand when no M-JPEG frame exists.
     private val snapshotFrameStore = SnapshotFrameStore()
-    private val snapshotOverlayCompositor = EncodedOverlayCompositor()
+    private val snapshotOverlayCompositor = EncodedOverlayCompositor(illuminanceProvider = illuminance)
 
     // ── Eco idle-fps mode (battery-powered idle sessions) ──
     // The persisted toggle arrives through [setEcoIdleFpsEnabled] (the

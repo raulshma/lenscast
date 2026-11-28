@@ -167,6 +167,7 @@ class SettingsDtosTest {
         assertEquals(2_048, streaming.storageQuotaMb)
         assertEquals("not_downloaded", streaming.mlModelState)
         assertEquals("TOP_LEFT", streaming.overlayPosition)
+        assertFalse(streaming.showIlluminance)
         assertEquals("homeassistant", streaming.mqttDiscoveryPrefix)
         assertEquals(1439, streaming.motionArmEndMinute)
     }

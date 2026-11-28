@@ -353,7 +353,7 @@ internal object StreamingFieldCatalog {
     }
 
     /**
-     * The ONE composite overlay descriptor across its sixteen wire fields:
+     * The ONE composite overlay descriptor across its seventeen wire fields:
      * decode fans the stored [OverlaySettings] out to the wire keys, encode
      * fans any touched overlay field back into the whole rebuilt composite —
      * its untouched siblings ride the merged document, and the blank-fallbacks
@@ -374,6 +374,7 @@ internal object StreamingFieldCatalog {
                 "showBranding" to overlay.showBranding,
                 "brandingText" to overlay.brandingText,
                 "showStatus" to overlay.showStatus,
+                "showIlluminance" to overlay.showIlluminance,
                 "showCustomText" to overlay.showCustomText,
                 "customText" to overlay.customText,
                 "overlayPosition" to overlay.position.name,
@@ -395,10 +396,10 @@ internal object StreamingFieldCatalog {
             }
     }
 
-    /** The sixteen wire fields the composite overlay descriptor covers. */
+    /** The seventeen wire fields the composite overlay descriptor covers. */
     private val OVERLAY_WIRE_KEYS = setOf(
         "overlayEnabled", "showTimestamp", "timestampFormat", "showBranding",
-        "brandingText", "showStatus", "showCustomText", "customText",
+        "brandingText", "showStatus", "showIlluminance", "showCustomText", "customText",
         "overlayPosition", "overlayFontSize", "overlayTextColor",
         "overlayBackgroundColor", "overlayPadding", "overlayLineHeight",
         "maskingEnabled", "maskingZones",
@@ -594,6 +595,7 @@ internal object StreamingFieldCatalog {
             showBranding = stream.showBranding,
             brandingText = stream.brandingText,
             showStatus = stream.showStatus,
+            showIlluminance = stream.showIlluminance,
             showCustomText = stream.showCustomText,
             customText = stream.customText,
             position = parseEnum(stream.overlayPosition, current.position),

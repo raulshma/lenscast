@@ -8,7 +8,9 @@ import type {
   AutomationRuleDto,
 } from '../types'
 import { API_DEFAULTS } from '../api/defaults'
+import { getStatus } from '../api/client'
 import { t } from '../lib/i18n'
+import { illuminanceLuxValue, illuminanceUnavailable } from '../lib/illuminance'
 import {
   automationActionLabelKey,
   automationConditionLabelKey,
@@ -31,6 +33,7 @@ import {
   humanizeDuration,
   isAutoSentinelParam,
   isEveryDayMask,
+  isWideNumericSpan,
   joinSummaryLines,
   moveSpec,
   paramSliderBounds,
@@ -73,6 +76,44 @@ type PickerTarget = 'trigger' | 'condition' | 'action'
 const COOLDOWN_SLIDER_MAX = 3_600
 
 /**
+ * How often the editor's live lux readout refetches /api/status while an
+ * illuminance trigger/condition is on the draft. Faster than the device's
+ * poll-demand pulse TTL (LightSensorPolicy.STATUS_PULSE_TTL_MS), so the very
+ * act of configuring the threshold keeps the sensor sampled — the readout the
+ * issue asked for: pick the threshold against the measured lux.
+ */
+const LUX_READOUT_POLL_MS = 5_000
+
+/**
+ * One live-lux row (issue #27): the measured reading rendered beside the
+ * threshold inputs, so the number being typed has a visible reference. The
+ * value/waiting/unavailable states come from the shared illuminance verdict
+ * — deliberately the same words the overlay card shows for the same payload.
+ */
+function LuxReadout(props: { value: () => number | null; unavailable: () => boolean }) {
+  return (
+    <div class="field-row">
+      <span class="field-label">{t('automation.illuminanceNow')}</span>
+      <Show
+        when={props.value() != null}
+        fallback={
+          <Show
+            when={props.unavailable()}
+            fallback={<span class="field-hint" role="status">{t('overlay.illuminanceWaiting')}</span>}
+          >
+            <span class="field-hint" role="status">{t('overlay.illuminanceUnavailable')}</span>
+          </Show>
+        }
+      >
+        <span class="field-value" role="status" aria-live="polite">
+          {t('overlay.illuminanceValue', { value: props.value()! })}
+        </span>
+      </Show>
+    </div>
+  )
+}
+
+/**
  * The rule editor dialog — the web twin of the app's AutomationRuleEditor:
  * WHEN / ONLY WHEN / THEN sections with colored headers and counts, grouped
  * icon+description picker dialogs (replacing the bare select rows),
@@ -94,10 +135,12 @@ export default function AutomationRuleEditor(props: Props) {
   const [minuteOfDay, setMinuteOfDay] = createSignal(props.draft.minuteOfDay)
   const [daysMask, setDaysMask] = createSignal(props.draft.daysMask)
   const [enabled, setEnabled] = createSignal(props.draft.enabled)
-  // The trigger's params ride a stable in-place record + the shared mutation
-  // counter (see actionsVersion): swapping the trigger reseeds them from the
-  // new catalog entry's required defaults.
-  let triggerParams: Record<string, string> = { ...props.draft.triggerParams }
+  // The trigger's params ride a reactive signal + the shared mutation
+  // counter (see specsVersion): swapping or updating trigger params passes a
+  // fresh record through the reactive `params={triggerParams()}` getter so
+  // AutomationParamEditor's badge, slider, and typed input never read a stale
+  // initial object reference.
+  const [triggerParams, setTriggerParams] = createSignal<Record<string, string>>({ ...props.draft.triggerParams })
   // Action/condition drafts keep a stable object identity across param edits:
   // the editors mutate `params` in place and bump the version, so the value
   // displays stay reactive WITHOUT the param-editor DOM (an open range
@@ -111,6 +154,49 @@ export default function AutomationRuleEditor(props: Props) {
   const [specsVersion, setSpecsVersion] = createSignal(0)
   const [conditionMode, setConditionMode] = createSignal(props.draft.conditionMode)
   const [cooldownSeconds, setCooldownSeconds] = createSignal(props.draft.cooldownSeconds)
+  // The live ambient-light readout (issue #27): while the draft configures an
+  // illuminance trigger or condition, poll /api/status so the threshold is
+  // picked against the measured lux — the same readout the overlay card
+  // shows, at the place the number is typed. Self-fetching (the editor is
+  // mounted from self-fetching surfaces in both shells, neither of which
+  // owns a status signal), and only while the dialog is open.
+  const usesIlluminance = createMemo(
+    () => triggerType() === 'illuminance' || conditions().some((condition) => condition.type === 'illuminance'),
+  )
+  const [liveLux, setLiveLux] = createSignal<number | null>(null)
+  const [luxAvailable, setLuxAvailable] = createSignal<boolean | null>(null)
+  createEffect(() => {
+    if (!usesIlluminance()) return
+    let alive = true
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const poll = async () => {
+      try {
+        const status = await getStatus()
+        if (!alive) return
+        // The raw pair rides into the shared verdict — its sanitization is
+        // the one place that decides "invalid" or "unknown" (folding an
+        // older device's absent verdict field into a claimed "no sensor"
+        // here was the readout's one lie; the verdict waits instead).
+        setLiveLux(status.illuminanceLux)
+        setLuxAvailable(status.lightSensorAvailable)
+      } catch {
+        if (!alive) return
+        setLiveLux(null)
+        setLuxAvailable(null)
+      }
+      if (alive) timer = setTimeout(poll, LUX_READOUT_POLL_MS)
+    }
+    void poll()
+    onCleanup(() => {
+      alive = false
+      if (timer !== undefined) clearTimeout(timer)
+      setLiveLux(null)
+      setLuxAvailable(null)
+    })
+  })
+  const luxValue = () => illuminanceLuxValue({ illuminanceLux: liveLux(), lightSensorAvailable: luxAvailable() })
+  const luxUnavailable = () =>
+    illuminanceUnavailable({ illuminanceLux: liveLux(), lightSensorAvailable: luxAvailable() })
   // The missed-run policy rides along even for event triggers (the editor
   // only renders it for time rules) — the device folds it on save, so a
   // stale value can never wedge anything.
@@ -165,7 +251,7 @@ export default function AutomationRuleEditor(props: Props) {
   })
 
   function setTriggerParam(paramName: string, value: string | null) {
-    triggerParams = withSpecParam(triggerParams, paramName, value)
+    setTriggerParams((prev) => withSpecParam(prev, paramName, value))
     setSpecsVersion((v) => v + 1)
   }
 
@@ -177,7 +263,7 @@ export default function AutomationRuleEditor(props: Props) {
 
   function changeTrigger(typeId: string) {
     setTriggerType(typeId)
-    triggerParams = defaultTriggerParams(triggerFor(typeId))
+    setTriggerParams(defaultTriggerParams(triggerFor(typeId)))
     setSpecsVersion((v) => v + 1)
   }
 
@@ -250,7 +336,7 @@ export default function AutomationRuleEditor(props: Props) {
       return `${formatMinuteOfDay(minuteOfDay())} · ${dayText}`
     }
     specsVersion()
-    return joinSummaryLines(automationTriggerSummaryLines({ triggerType: triggerType(), triggerParams }), t)
+    return joinSummaryLines(automationTriggerSummaryLines({ triggerType: triggerType(), triggerParams: triggerParams() }), t)
   }
 
   const previewOnlyText = () => {
@@ -295,7 +381,7 @@ export default function AutomationRuleEditor(props: Props) {
       triggerType: triggerType(),
       minuteOfDay: minuteOfDay(),
       daysMask: daysMask(),
-      triggerParams: { ...triggerParams },
+      triggerParams: { ...triggerParams() },
       conditions: conditions().map((condition) => ({ type: condition.type, params: { ...condition.params } })),
       conditionMode: conditionMode(),
       cooldownSeconds: cooldownSeconds(),
@@ -397,7 +483,7 @@ export default function AutomationRuleEditor(props: Props) {
                         typeId={triggerType()}
                         spec={spec}
                         catalogAction={undefined}
-                        params={triggerParams}
+                        params={triggerParams()}
                         version={specsVersion}
                         idPrefix="automation-trigger-param"
                         lastManualByParam={lastManualByParam}
@@ -405,6 +491,9 @@ export default function AutomationRuleEditor(props: Props) {
                       />
                     )}
                   </For>
+                  <Show when={triggerType() === 'illuminance'}>
+                    <LuxReadout value={luxValue} unavailable={luxUnavailable} />
+                  </Show>
                   <div class="field-group">
                     <div class="field-row">
                       <span class="field-label">{t('automation.editor.cooldown')}</span>
@@ -597,6 +686,10 @@ export default function AutomationRuleEditor(props: Props) {
                 />
               )}
             </For>
+
+            <Show when={conditions().some((condition) => condition.type === 'illuminance')}>
+              <LuxReadout value={luxValue} unavailable={luxUnavailable} />
+            </Show>
 
             <button class="card-btn automation-add-spec-btn" onClick={() => setPicker('condition')} disabled={atConditionCap()}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1097,6 +1190,53 @@ function AutomationParamEditor(props: {
     props.onChange(props.spec.name, canonicalParamValue(props.spec, parsed))
   }
 
+  function typedInput(e: InputEvent & { currentTarget: HTMLInputElement }, min: number) {
+    const raw = e.currentTarget.value.trim()
+    if (raw === '') return
+    const parsed = Number.parseFloat(raw)
+    if (!Number.isFinite(parsed)) return
+    const clamped = Math.max(min, Math.min(bounds().max, parsed))
+    props.lastManualByParam.set(props.spec.name, clamped)
+    props.onChange(props.spec.name, canonicalParamValue(props.spec, clamped))
+  }
+
+  function typedBlur(e: FocusEvent & { currentTarget: HTMLInputElement }, min: number, fallback: string) {
+    const raw = e.currentTarget.value.trim()
+    if (raw === '') {
+      e.currentTarget.value = fallback
+      return
+    }
+    const parsed = Number.parseFloat(raw)
+    if (!Number.isFinite(parsed)) {
+      e.currentTarget.value = fallback
+      return
+    }
+    const clamped = Math.max(min, Math.min(bounds().max, parsed))
+    const canonical = canonicalParamValue(props.spec, clamped)
+    e.currentTarget.value = canonical
+    props.lastManualByParam.set(props.spec.name, clamped)
+    props.onChange(props.spec.name, canonical)
+  }
+
+  function renderWideNumberInput(min: () => number, currentValue: () => string) {
+    return (
+      <Show when={isWideNumericSpan(props.spec.kind, min(), bounds().max)}>
+        <input
+          id={`${inputId()}-number`}
+          type="number"
+          class="field-input field-input-full"
+          min={min()}
+          max={bounds().max}
+          step={1}
+          aria-label={label()}
+          value={currentValue()}
+          onInput={(e) => typedInput(e, min())}
+          onBlur={(e) => typedBlur(e, min(), currentValue())}
+        />
+      </Show>
+    )
+  }
+
   // ── BOOL ──
   if (props.spec.kind === 'BOOL') {
     const configured = () => value() != null
@@ -1236,6 +1376,7 @@ function AutomationParamEditor(props: {
                 value={numericValue()}
                 onInput={(e) => sliderInput(e.currentTarget.value)}
               />
+              {renderWideNumberInput(manualMin, () => value() ?? String(manualMin()))}
             </div>
           </Show>
         </Show>
@@ -1277,6 +1418,7 @@ function AutomationParamEditor(props: {
               value={numericValue()}
               onInput={(e) => sliderInput(e.currentTarget.value)}
             />
+            {renderWideNumberInput(() => bounds().min, () => value() ?? canonicalParamValue(props.spec, bounds().min))}
             <Show when={props.spec.name === 'duration_seconds'}>
               <div class="automation-param-hint">{t('automation.editor.durationHint')}</div>
             </Show>
@@ -1305,6 +1447,7 @@ function AutomationParamEditor(props: {
         value={numericValue()}
         onInput={(e) => sliderInput(e.currentTarget.value)}
       />
+      {renderWideNumberInput(() => bounds().min, () => value() ?? props.spec.defaultValue)}
     </div>
   )
 }

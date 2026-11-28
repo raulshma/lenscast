@@ -40,6 +40,7 @@ export const AUTOMATION_TRIGGER_TYPES = [
   'tamper_detected',
   'charging_changed',
   'battery_level',
+  'illuminance',
   'streaming_changed',
   'viewers_changed',
   'app_started',
@@ -50,6 +51,7 @@ export const AUTOMATION_CONDITION_TYPES = [
   'time_window',
   'charging',
   'battery_level',
+  'illuminance',
   'power_save',
   'wifi_connected',
   'streaming',
@@ -149,6 +151,8 @@ const PARAM_LABEL_OVERRIDES: Record<string, string> = {
   // Triggers
   'battery_level/level': 'automation.param.batteryThreshold',
   'battery_level/when_below': 'automation.param.whenBelow',
+  'illuminance/lux': 'automation.param.luxThreshold',
+  'illuminance/when_below': 'automation.param.whenBelow',
   'charging_changed/charging': 'automation.param.chargingPlugged',
   'streaming_changed/streaming': 'automation.param.streamingActive',
   'viewers_changed/connected': 'automation.param.viewersConnected',
@@ -159,6 +163,8 @@ const PARAM_LABEL_OVERRIDES: Record<string, string> = {
   'charging/charging': 'automation.param.chargingPlugged',
   'battery_level/min_level': 'automation.param.batteryMin',
   'battery_level/max_level': 'automation.param.batteryMax',
+  'illuminance/min_lux': 'automation.param.luxMin',
+  'illuminance/max_lux': 'automation.param.luxMax',
   'power_save/enabled': 'automation.param.powerSaveOn',
   'wifi_connected/connected': 'automation.param.wifiConnected',
   'streaming/active': 'automation.param.streamingActive',
@@ -387,6 +393,14 @@ export function paramSliderBounds(spec: Pick<AutomationCatalogParamDto, 'min' | 
   return { min: spec.min ?? 0, max: spec.max ?? 100 }
 }
 
+/** Widest INT span that still resolves single values on a track (mirrors AutomationViewModel.sliderIsWide). */
+const WIDE_SLIDER_SPAN_CAP = 100
+
+/** Whether a numeric INT param span is too wide to resolve single values on a slider alone, so a typed input accompanies it. */
+export function isWideNumericSpan(kind: AutomationCatalogParamDto['kind'], min: number, max: number): boolean {
+  return kind === 'INT' && Math.round(max - min) > WIDE_SLIDER_SPAN_CAP
+}
+
 // ── rule/action construction ──
 
 /**
@@ -466,6 +480,14 @@ function intParam(params: Record<string, string>, name: string): number | null {
   return Number.isFinite(parsed) ? parsed : null
 }
 
+/** A published 0–100000 integer lux value, or null for an unknown/malformed reading. */
+function luxParam(params: Record<string, string>, name: string): number | null {
+  const raw = params[name]?.trim() ?? ''
+  if (!/^\d+$/.test(raw)) return null
+  const parsed = Number(raw)
+  return Number.isSafeInteger(parsed) && parsed >= 0 && parsed <= 100_000 ? parsed : null
+}
+
 /**
  * The rule-card summary line for a rule's TRIGGER: [] for time-of-day rules
  * (their card shows the classic HH:mm · days label) and one "when …" line for
@@ -494,6 +516,14 @@ export function automationTriggerSummaryLines(rule: Pick<AutomationRuleDto, 'tri
         boolParam(params, 'when_below', true)
           ? { key: 'automation.summary.triggerBatteryBelow', params: { value: level } }
           : { key: 'automation.summary.triggerBatteryAbove', params: { value: level } },
+      ]
+    }
+    case 'illuminance': {
+      const lux = luxParam(params, 'lux') ?? 100
+      return [
+        boolParam(params, 'when_below', true)
+          ? { key: 'automation.summary.triggerLuxBelow', params: { value: lux } }
+          : { key: 'automation.summary.triggerLuxAbove', params: { value: lux } },
       ]
     }
     case 'streaming_changed':
@@ -544,6 +574,16 @@ export function automationConditionSummaryLines(condition: Pick<AutomationCondit
       if (min != null) return [{ key: 'automation.summary.conditionBatteryMin', params: { value: min } }]
       if (max != null) return [{ key: 'automation.summary.conditionBatteryMax', params: { value: max } }]
       return [{ key: 'automation.summary.conditionBatteryAny' }]
+    }
+    case 'illuminance': {
+      const min = luxParam(params, 'min_lux')
+      const max = luxParam(params, 'max_lux')
+      if (min != null && max != null) {
+        return [{ key: 'automation.summary.conditionLuxBetween', params: { min, max } }]
+      }
+      if (min != null) return [{ key: 'automation.summary.conditionLuxMin', params: { value: min } }]
+      if (max != null) return [{ key: 'automation.summary.conditionLuxMax', params: { value: max } }]
+      return [{ key: 'automation.summary.conditionLuxAny' }]
     }
     case 'power_save':
       return [

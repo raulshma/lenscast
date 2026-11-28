@@ -9,8 +9,10 @@ import com.raulshma.lenscast.streaming.web.StatusSnapshotBuilder.StreamingInputs
 import com.raulshma.lenscast.streaming.web.StatusSnapshotBuilder.ThermalInputs
 import com.raulshma.lenscast.streaming.web.StatusSnapshotBuilder.WatchdogInputs
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class StatusSnapshotBuilderTest {
@@ -137,6 +139,43 @@ class StatusSnapshotBuilderTest {
         assertNull(response.connectionQuality)
         assertEquals(false, response.streaming.isActive)
         assertEquals("http://phone:8080/stream", response.streaming.url)
+    }
+
+    @Test
+    fun `ambient light reading and availability pass through`() {
+        val response = StatusSnapshotBuilder.build(
+            streaming = streaming(active = false),
+            thermal = thermal(),
+            battery = battery(),
+            watchdog = watchdog(),
+            adaptive = adaptive(enabled = false),
+            network = network(),
+            illuminanceLux = 320,
+            lightSensorAvailable = true,
+        )
+
+        assertEquals(320, response.illuminanceLux)
+        assertTrue(response.lightSensorAvailable)
+    }
+
+    @Test
+    fun `ambient light preserves zero and unknown readings`() {
+        val zero = StatusSnapshotBuilder.build(
+            streaming = streaming(active = false),
+            thermal = thermal(),
+            battery = battery(),
+            watchdog = watchdog(),
+            adaptive = adaptive(enabled = false),
+            network = network(),
+            illuminanceLux = 0,
+            lightSensorAvailable = true,
+        )
+        val unknown = zero.copy(illuminanceLux = null, lightSensorAvailable = false)
+
+        assertEquals(0, zero.illuminanceLux)
+        assertTrue(zero.lightSensorAvailable)
+        assertNull(unknown.illuminanceLux)
+        assertFalse(unknown.lightSensorAvailable)
     }
 
     @Test

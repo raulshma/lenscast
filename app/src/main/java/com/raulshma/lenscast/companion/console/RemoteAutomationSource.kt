@@ -1,5 +1,6 @@
 package com.raulshma.lenscast.companion.console
 
+import com.raulshma.lenscast.automation.AutomationIlluminance
 import com.raulshma.lenscast.automation.AutomationSource
 import com.raulshma.lenscast.automation.schedule.AutomationRule
 import com.raulshma.lenscast.companion.client.LenscastApiClient
@@ -75,9 +76,12 @@ import kotlinx.coroutines.withTimeoutOrNull
  * and therefore pass through the screen's decodeOccurrenceKey verbatim —
  * the same "Last ran …" line either backend.
  *
- * Degraded-to-hidden: [torchStrengthMaxLevel] pins null — the wire
- * publishes no flash-level reading, which is exactly the "not yet reported"
- * rendering, so the torch strength editor rides the catalog span.
+ * The editor's lux readout ([illuminance]) rides `GET /api/status` — the
+ * same document the web editor polls for its own readout, at the same beat.
+ *
+ * * Degraded-to-hidden: [torchStrengthMaxLevel] pins null — the wire
+ *   publishes no flash-level reading, which is exactly the "not yet reported"
+ *   rendering, so the torch strength editor rides the catalog span.
  *
  * Role gate: [canEdit] is the roster role's verdict (a viewer pairing would
  * 403 every config write; the flag hides the write affordances instead —
@@ -154,6 +158,34 @@ class RemoteAutomationSource(
 
     // No flash-level carrier on the wire: the "not yet reported" rendering.
     override val torchStrengthMaxLevel: StateFlow<Int?> = MutableStateFlow(null)
+
+    /**
+     * Polled off `GET /api/status` on its own WhileSubscribed beat, and the
+     * beat IS the demand on the far side: every status GET arms the paired
+     * device's dashboard demand pulse (LightSensorPolicy's status-pulse
+     * gate, longer than this beat), so an editor showing the lux readout
+     * keeps that device's sensor sampled with no route of its own. A failed
+     * poll keeps the last reading — a read must never blank a value the
+     * editor is showing.
+     */
+    override val illuminance: StateFlow<AutomationIlluminance> = flow {
+        while (true) {
+            readIlluminance()?.let { emit(it) }
+            delay(timings.luxPollMs)
+        }
+    }.stateIn(scope, SharingStarted.WhileSubscribed(SUBSCRIBE_GRACE_MS), AutomationIlluminance.UNKNOWN)
+
+    private suspend fun readIlluminance(): AutomationIlluminance? {
+        val client = api ?: return null
+        val status = try {
+            client.getStatus()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            return null // a read: transient failure keeps the last reading
+        }
+        return AutomationIlluminance(lux = status.illuminanceLux, sensorAvailable = status.lightSensorAvailable)
+    }
 
     private suspend fun fetchDoc() {
         val client = api ?: return

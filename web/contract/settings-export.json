@@ -56,6 +56,7 @@
       "showBranding": false,
       "brandingText": "LensCast",
       "showStatus": false,
+      "showIlluminance": false,
       "showCustomText": false,
       "customText": "",
       "overlayPosition": "TOP_LEFT",

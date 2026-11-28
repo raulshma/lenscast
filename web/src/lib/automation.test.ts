@@ -23,6 +23,7 @@ import {
   isAutoSentinelParam,
   isEveryDayMask,
   isRuleValid,
+  isWideNumericSpan,
   lastFiredLabel,
   moveSpec,
   newAutomationRule,
@@ -284,6 +285,7 @@ describe('automation trigger and condition label keys', () => {
     expect(automationTriggerLabelKey('time_of_day')).toBe('automation.trigger.time_of_day')
     expect(automationTriggerLabelKey('motion_detected')).toBe('automation.trigger.motion_detected')
     expect(automationTriggerLabelKey('battery_level')).toBe('automation.trigger.battery_level')
+    expect(automationTriggerLabelKey('illuminance')).toBe('automation.trigger.illuminance')
     expect(automationTriggerLabelKey('app_started')).toBe('automation.trigger.app_started')
     expect(automationTriggerLabelKey('teleport_event')).toBe('automation.action.unknown')
   })
@@ -291,6 +293,7 @@ describe('automation trigger and condition label keys', () => {
   it('every condition id gets its catalog key, unknown ids fall back', () => {
     expect(automationConditionLabelKey('time_window')).toBe('automation.condition.time_window')
     expect(automationConditionLabelKey('battery_level')).toBe('automation.condition.battery_level')
+    expect(automationConditionLabelKey('illuminance')).toBe('automation.condition.illuminance')
     expect(automationConditionLabelKey('motion_detection')).toBe('automation.condition.motion_detection')
     expect(automationConditionLabelKey('moon_phase')).toBe('automation.action.unknown')
   })
@@ -299,6 +302,10 @@ describe('automation trigger and condition label keys', () => {
     // Trigger overrides — "connected" reads as viewer presence, not Wi-Fi.
     expect(automationParamLabelKey('battery_level', 'level')).toBe('automation.param.batteryThreshold')
     expect(automationParamLabelKey('battery_level', 'when_below')).toBe('automation.param.whenBelow')
+    expect(automationParamLabelKey('illuminance', 'lux')).toBe('automation.param.luxThreshold')
+    expect(automationParamLabelKey('illuminance', 'when_below')).toBe('automation.param.whenBelow')
+    expect(automationParamLabelKey('illuminance', 'min_lux')).toBe('automation.param.luxMin')
+    expect(automationParamLabelKey('illuminance', 'max_lux')).toBe('automation.param.luxMax')
     expect(automationParamLabelKey('charging_changed', 'charging')).toBe('automation.param.chargingPlugged')
     expect(automationParamLabelKey('streaming_changed', 'streaming')).toBe('automation.param.streamingActive')
     expect(automationParamLabelKey('viewers_changed', 'connected')).toBe('automation.param.viewersConnected')
@@ -332,6 +339,8 @@ describe('automation trigger and condition label keys', () => {
       ],
     }
     expect(defaultTriggerParams(batteryCatalog)).toEqual({ level: '20' })
+    const illuminance = fixtureTriggers.find((entry) => entry.id === 'illuminance')!
+    expect(defaultTriggerParams(illuminance)).toEqual({ lux: '100', when_below: 'true' })
     expect(defaultTriggerParams(undefined)).toEqual({})
   })
 
@@ -344,6 +353,7 @@ describe('automation trigger and condition label keys', () => {
       ],
     }
     expect(defaultConditionParams(timeWindowCatalog)).toEqual({})
+    expect(defaultConditionParams(fixtureConditions.find((entry) => entry.id === 'illuminance'))).toEqual({})
     expect(defaultConditionParams({ params: [] })).toEqual({})
     expect(defaultConditionParams(undefined)).toEqual({})
   })
@@ -401,6 +411,23 @@ describe('automation trigger summaries', () => {
     expect(automationTriggerSummaryLines({ triggerType: 'battery_level', triggerParams: { level: 'bogus' } })).toEqual([
       { key: 'automation.summary.triggerBatteryBelow', params: { value: 20 } },
     ])
+  })
+
+  it('illuminance renders below/above with the lux threshold and safe defaults', () => {
+    expect(automationTriggerSummaryLines({ triggerType: 'illuminance', triggerParams: { lux: '0', when_below: 'true' } })).toEqual([
+      { key: 'automation.summary.triggerLuxBelow', params: { value: 0 } },
+    ])
+    expect(automationTriggerSummaryLines({ triggerType: 'illuminance', triggerParams: { lux: '500', when_below: 'false' } })).toEqual([
+      { key: 'automation.summary.triggerLuxAbove', params: { value: 500 } },
+    ])
+    expect(automationTriggerSummaryLines({ triggerType: 'illuminance', triggerParams: {} })).toEqual([
+      { key: 'automation.summary.triggerLuxBelow', params: { value: 100 } },
+    ])
+    for (const lux of ['bogus', '12.5', '-1', '100001', '9007199254740992']) {
+      expect(automationTriggerSummaryLines({ triggerType: 'illuminance', triggerParams: { lux } })).toEqual([
+        { key: 'automation.summary.triggerLuxBelow', params: { value: 100 } },
+      ])
+    }
   })
 
   it('unknown trigger types render no line (the card already shows the unknown label)', () => {
@@ -480,6 +507,24 @@ describe('automation condition summaries', () => {
     ])
     expect(automationConditionSummaryLines({ type: 'viewers', params: {} })).toEqual([
       { key: 'automation.summary.conditionViewersAny' },
+    ])
+  })
+
+  it('illuminance renders inclusive between/min/max/any shapes and ignores malformed bounds', () => {
+    expect(automationConditionSummaryLines({ type: 'illuminance', params: { min_lux: '0', max_lux: '100000' } })).toEqual([
+      { key: 'automation.summary.conditionLuxBetween', params: { min: 0, max: 100000 } },
+    ])
+    expect(automationConditionSummaryLines({ type: 'illuminance', params: { min_lux: '20' } })).toEqual([
+      { key: 'automation.summary.conditionLuxMin', params: { value: 20 } },
+    ])
+    expect(automationConditionSummaryLines({ type: 'illuminance', params: { max_lux: '80' } })).toEqual([
+      { key: 'automation.summary.conditionLuxMax', params: { value: 80 } },
+    ])
+    expect(automationConditionSummaryLines({ type: 'illuminance', params: {} })).toEqual([
+      { key: 'automation.summary.conditionLuxAny' },
+    ])
+    expect(automationConditionSummaryLines({ type: 'illuminance', params: { min_lux: 'bogus', max_lux: '80' } })).toEqual([
+      { key: 'automation.summary.conditionLuxMax', params: { value: 80 } },
     ])
   })
 
@@ -738,5 +783,15 @@ describe('automationDayLabelKey', () => {
     expect(automationDayLabelKey(6)).toBe('automation.day.6')
     expect(automationDayLabelKey(-3)).toBe('automation.day.0')
     expect(automationDayLabelKey(9)).toBe('automation.day.6')
+  })
+})
+
+describe('isWideNumericSpan', () => {
+  it('flags wide INT spans like lux and durations while keeping narrow or FLOAT spans slider-only', () => {
+    expect(isWideNumericSpan('INT', 0, 100_000)).toBe(true)
+    expect(isWideNumericSpan('INT', 0, 101)).toBe(true)
+    expect(isWideNumericSpan('INT', 0, 100)).toBe(false)
+    expect(isWideNumericSpan('INT', 1, 8)).toBe(false)
+    expect(isWideNumericSpan('FLOAT', 0, 1_000)).toBe(false)
   })
 })

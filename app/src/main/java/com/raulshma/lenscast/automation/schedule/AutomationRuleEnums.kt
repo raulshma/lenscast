@@ -65,6 +65,7 @@ enum class AutomationTriggerKind(val id: String) {
     MOTION_DETECTED(AutomationTriggerCatalog.MOTION_DETECTED),
     SOUND_DETECTED(AutomationTriggerCatalog.SOUND_DETECTED),
     TAMPER_DETECTED(AutomationTriggerCatalog.TAMPER_DETECTED),
+    ILLUMINANCE(AutomationTriggerCatalog.ILLUMINANCE),
     CHARGING_CHANGED(AutomationTriggerCatalog.CHARGING_CHANGED),
     BATTERY_LEVEL(AutomationTriggerCatalog.BATTERY_LEVEL),
     STREAMING_CHANGED(AutomationTriggerCatalog.STREAMING_CHANGED),

@@ -101,5 +101,7 @@
     "codec": "vp8",
     "width": 600,
     "height": 800
-  }
+  },
+  "illuminanceLux": 320,
+  "lightSensorAvailable": true
 }

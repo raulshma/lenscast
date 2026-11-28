@@ -162,6 +162,7 @@ export interface StreamingSettings {
   showBranding: boolean
   brandingText: string
   showStatus: boolean
+  showIlluminance: boolean
   showCustomText: boolean
   customText: string
   overlayPosition: OverlayPosition
@@ -414,6 +415,14 @@ export interface DeviceStatus {
     isCharging: boolean
     isPowerSaveMode: boolean
   }
+  /** Latest ambient-light sample in lux; null while no reading is available. */
+  illuminanceLux: number | null
+  /**
+   * Whether the device exposes an ambient-light sensor. Null = no answer yet
+   * (older firmware omits the field) — never rendered as "no sensor"; only a
+   * known false is that claim (lib/illuminance.ts is the one verdict).
+   */
+  lightSensorAvailable: boolean | null
   camera: string
   /** Live torch state, so dashboard toggles mirror the device. */
   torchOn: boolean
@@ -936,6 +945,7 @@ export const DEFAULT_OVERLAY_SETTINGS: Partial<StreamingSettings> = {
   showBranding: false,
   brandingText: 'LensCast',
   showStatus: false,
+  showIlluminance: false,
   showCustomText: false,
   customText: '',
   overlayPosition: 'TOP_LEFT',
@@ -1197,6 +1207,7 @@ export type AutomationIconVocabulary =
   | 'camera'
   | 'torch'
   | 'lightbulb'
+  | 'light_sensor'
   | 'siren'
   | 'nightlight'
   | 'videocam'

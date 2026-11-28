@@ -17,7 +17,9 @@ import java.util.Calendar
  *
  * `null` [batteryLevel] means "unknown" (the OS has not reported a level
  * yet); conditions that compare levels treat unknown as *not met* rather
- * than guessing.
+ * than guessing. `null` [illuminanceLux] is unknown the same way — the
+ * light sensor is demand-gated, so it reads null until something asks for
+ * a sample — and the illuminance condition reads it as *not met* too.
  *
  * @param charging On external power right now.
  * @param batteryLevel Percent 0..100, or null when not yet known.
@@ -30,6 +32,9 @@ import java.util.Calendar
  * @param recordingActive A recording is running (bounded or continuous).
  * @param thermalNormal Thermal state is normal (nothing throttling).
  * @param motionDetectionEnabled The persisted motion-detection toggle.
+ * @param illuminanceLux Smoothed ambient illuminance in lux, or null while
+ *   the light sensor is unsampled (no demand gate open) or still debouncing
+ *   its first reading.
  */
 data class AutomationSensorSnapshot(
     val minuteOfDay: Int,
@@ -45,6 +50,7 @@ data class AutomationSensorSnapshot(
     val recordingActive: Boolean,
     val thermalNormal: Boolean,
     val motionDetectionEnabled: Boolean,
+    val illuminanceLux: Int? = null,
 ) {
     companion object {
         /**
@@ -65,6 +71,7 @@ data class AutomationSensorSnapshot(
             recordingActive: Boolean,
             thermalNormal: Boolean,
             motionDetectionEnabled: Boolean,
+            illuminanceLux: Int? = null,
         ): AutomationSensorSnapshot = AutomationSensorSnapshot(
             minuteOfDay = LocalWallClock.minuteOfDay(calendar),
             epochDay = LocalWallClock.epochDay(calendar),
@@ -79,6 +86,7 @@ data class AutomationSensorSnapshot(
             recordingActive = recordingActive,
             thermalNormal = thermalNormal,
             motionDetectionEnabled = motionDetectionEnabled,
+            illuminanceLux = illuminanceLux,
         )
     }
 }

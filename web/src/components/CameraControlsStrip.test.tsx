@@ -27,6 +27,8 @@ const BASE_STATUS: DeviceStatus = {
   },
   thermal: 'NORMAL',
   battery: { level: 80, isCharging: false, isPowerSaveMode: false },
+  illuminanceLux: null,
+  lightSensorAvailable: false,
   camera: 'active',
   torchOn: false,
   sirenActive: false,

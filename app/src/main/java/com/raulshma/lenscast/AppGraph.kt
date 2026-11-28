@@ -3,6 +3,7 @@ package com.raulshma.lenscast
 import com.raulshma.lenscast.automation.AutomationTestController
 import com.raulshma.lenscast.automation.schedule.AutomationFireJournal
 import com.raulshma.lenscast.camera.CameraService
+import com.raulshma.lenscast.camera.LightSensorMonitor
 import com.raulshma.lenscast.capture.DecryptedPhotoCache
 import com.raulshma.lenscast.capture.DetectionCoordinator
 import com.raulshma.lenscast.capture.DetectionEventStore
@@ -52,6 +53,7 @@ import kotlinx.coroutines.CoroutineScope
  */
 interface AppGraph {
     val cameraService: CameraService
+    val lightSensorMonitor: LightSensorMonitor
     val streamingManager: StreamingManager
     val settingsDataStore: SettingsDataStore
     val mediaKeyProvider: MediaCrypto.KeyProvider
@@ -208,6 +210,20 @@ interface AppGraph {
      * lands in the log.
      */
     fun launchSoftRestart()
+
+    /**
+     * The light sensor's dashboard-demand inputs: the SSE transport's client
+     * count and the stamp of the last served plain status GET. The host owns
+     * the flows and the one collector that folds them (with the pulse TTL
+     * verdict in LightSensorPolicy, stamped on the monotonic
+     * `SystemClock.elapsedRealtime` clock so a wall-clock correction cannot
+     * stretch or cut the pulse) into the monitor's dashboard gate — the
+     * Web API stack reports through these seams, never at the flag itself.
+     */
+    fun onLightSensorSseClients(count: Int)
+
+    /** The per-served-status pulse arm ([onLightSensorSseClients]'s poller half). */
+    fun onLightSensorStatusServed()
 
     /**
      * The Automation Test's arm/restore owner (issue #18 item 3): fires a

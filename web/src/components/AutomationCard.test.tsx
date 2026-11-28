@@ -19,12 +19,20 @@ let state: AutomationStateDto
 let putBodies: AutomationUpdateRequestDto[]
 let confirmSpy: ReturnType<typeof vi.spyOn>
 let failNextPut: boolean
+/** The /api/status answer the editor's live lux readout polls (issue #27). */
+let statusPayload: Record<string, unknown>
 
 function stubFetch() {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof _input === 'string' ? _input : _input instanceof URL ? _input.href : _input.url
+      if (url.includes('/api/status')) {
+        return new Response(JSON.stringify(statusPayload), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
       if (url.includes('/api/automation')) {
         if (init?.method === 'PUT') {
           if (failNextPut) {
@@ -63,6 +71,7 @@ describe('AutomationCard rule rows', () => {
     state = JSON.parse(JSON.stringify(fixture)) as AutomationStateDto
     putBodies = []
     failNextPut = false
+    statusPayload = { illuminanceLux: 412, lightSensorAvailable: true }
     stubFetch()
     confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
     confirmSpy.mockClear()
@@ -133,6 +142,7 @@ describe('AutomationCard editor flow', () => {
     state = JSON.parse(JSON.stringify(fixture)) as AutomationStateDto
     putBodies = []
     failNextPut = false
+    statusPayload = { illuminanceLux: 412, lightSensorAvailable: true }
     stubFetch()
     confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
     confirmSpy.mockClear()
@@ -154,6 +164,59 @@ describe('AutomationCard editor flow', () => {
     expect(screen.getByText('Change')).toBeTruthy()
     // The preview mirrors the card's WHEN text (card row + preview row).
     expect(screen.getAllByText('When motion is detected').length).toBe(2)
+    // No illuminance on the draft → no lux readout, no status fetch.
+    expect(screen.queryByText('Ambient light now')).toBeNull()
+  })
+
+  it('shows the live lux readout while an illuminance trigger is on the draft', async () => {
+    // The illuminance rule rides second; openEditor(1) opens its editor.
+    state.rules = [state.rules[0], {
+      ...state.rules[0],
+      id: 'lux-rule',
+      name: 'Dusk lights',
+      triggerType: 'illuminance',
+      triggerParams: { lux: '100', when_below: 'true' },
+      conditions: [],
+    }]
+    await openEditor(1)
+    // The editor's status poll answers 412 lux → the measured reading rides
+    // beside the threshold inputs (issue #27's threshold-picking reference).
+    await screen.findByText('Ambient light now')
+    await waitFor(() => expect(screen.getByText('412 lux')).toBeTruthy())
+  })
+
+  it('the lux readout reports an unavailable sensor instead of a value', async () => {
+    statusPayload = { illuminanceLux: null, lightSensorAvailable: false }
+    state.rules = [state.rules[0], {
+      ...state.rules[0],
+      id: 'lux-rule',
+      name: 'Dusk lights',
+      triggerType: 'illuminance',
+      triggerParams: { lux: '100', when_below: 'true' },
+      conditions: [],
+    }]
+    await openEditor(1)
+    await screen.findByText('Ambient light now')
+    await waitFor(() =>
+      expect(screen.getByText('No ambient light sensor is available on this device.')).toBeTruthy(),
+    )
+  })
+
+  it('the lux readout waits on silence instead of claiming "no sensor"', async () => {
+    // An older device whose status carries neither field (or a poll that
+    // has not landed): "waiting", never the absence claim.
+    statusPayload = { streamUrl: 'x' }
+    state.rules = [state.rules[0], {
+      ...state.rules[0],
+      id: 'lux-rule',
+      name: 'Dusk lights',
+      triggerType: 'illuminance',
+      triggerParams: { lux: '100', when_below: 'true' },
+      conditions: [],
+    }]
+    await openEditor(1)
+    await screen.findByText('Ambient light now')
+    await waitFor(() => expect(screen.getByText('Waiting for a light reading…')).toBeTruthy())
   })
 
   it('Save stays disabled with no actions; clicking surfaces the inline error', async () => {
@@ -243,5 +306,42 @@ describe('AutomationCard editor flow', () => {
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(confirmSpy).toHaveBeenCalledTimes(1)
     expect(screen.getByText('Preview')).toBeTruthy() // declining keeps it open
+  })
+
+  it('wide lux inputs pair with a typed number field that syncs badge, slider, number input, and preview without stale refs', async () => {
+    state.rules = [state.rules[0], {
+      ...state.rules[0],
+      id: 'lux-rule',
+      name: 'Dusk lights',
+      triggerType: 'illuminance',
+      triggerParams: { lux: '100', when_below: 'true' },
+      conditions: [],
+    }]
+    await openEditor(1)
+    const numberInput = document.getElementById('automation-trigger-param-lux-number') as HTMLInputElement
+    const slider = numberInput.previousElementSibling as HTMLInputElement
+    const badge = slider.previousElementSibling!.querySelector('.field-value') as HTMLElement
+    expect(numberInput).toBeTruthy()
+    expect(slider.type).toBe('range')
+    expect(numberInput.value).toBe('100')
+    expect(slider.value).toBe('100')
+    expect(badge.textContent).toBe('100')
+
+    // Typing updates badge, slider, and preview on the exact same DOM node.
+    fireEvent.input(numberInput, { target: { value: '50' } })
+    expect(document.getElementById('automation-trigger-param-lux-number')).toBe(numberInput)
+    expect(badge.textContent).toBe('50')
+    expect(slider.value).toBe('50')
+    expect(screen.getAllByText(/50 lux/).length).toBeGreaterThan(0)
+
+    // Dragging/nudging the slider after typing starts from 50, not stale 100,
+    // and updates the number input too.
+    fireEvent.input(slider, { target: { value: '52' } })
+    expect(numberInput.value).toBe('52')
+    expect(badge.textContent).toBe('52')
+
+    fireEvent.click(screen.getAllByRole('button', { name: 'Save' }).at(-1)!)
+    await waitFor(() => expect(putBodies).toHaveLength(1))
+    expect(putBodies[0].rules[1].triggerParams).toEqual({ lux: '52', when_below: 'true' })
   })
 })

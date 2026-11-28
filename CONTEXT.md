@@ -2339,7 +2339,7 @@ on, so the connection config cannot drift between them.
 **`streaming/OverlayLayoutPolicy.kt`** — the pure overlay/masking math:
 `zoneToPixels` clipping, pixelate/blur downscale sizes, hex color parsing,
 the overlay line selection (`buildOverlayLines` — timestamp, branding,
-status, and the overlay-side viewer pluralization), and the text-overlay
+status, illuminance, and the overlay-side viewer pluralization), and the text-overlay
 position rect (`computeOverlayPosition` over the named
 `OVERLAY_MARGIN_PX`), plus `REFERENCE_WIDTH` — the width both outputs scale
 font sizes against, so identical settings render proportionally identical
@@ -2375,9 +2375,62 @@ aggregation: typed `StreamingInputs`/`ThermalInputs`/`BatteryInputs`/
 one `StatusResponseDto` out (adaptive null-when-disabled, connectionQuality
 null-when-idle, encodedStream null-while-not-encoding, whepStream
 null-while-no-viewer-has-reported — the two measured blocks do not gate
-each other — first-client fps).
+each other — first-client fps, `illuminanceLux` null-while-unsampled next
+to the boolean `lightSensorAvailable` — the Light Sensor Monitor's facts,
+read at snapshot time, with every served status arming the poller demand
+pulse through `onStatusServed`).
 `StatusWebHandler` only collects flows and
 delegates — the dashboard/API mapping is tested without a manager.
+
+### Light Sensor Monitor
+**`camera/LightSensorMonitor.kt`** — the device's one ambient-light
+listener, following the Spirit Level Monitor's shape (`SensorManager`,
+`TYPE_LIGHT`, availability as a property) with a different lifecycle:
+sampling is DEMAND-GATED, because lux chips on many devices light the
+screen logic on every sample. Four demand sources — automation
+(the master toggle with at least one enabled rule using the illuminance
+trigger or condition, set by `MainApplication.initializeLightSensorDemand`
+through the pure `AutomationSchedulePolicy.lightSensorDemand` predicate),
+the stream overlay (`showIlluminance` while streaming or previewing), the
+dashboard gate (one collector owned by `MainApplication` folds the SSE
+transport's `onDashboardClientsChanged` count and the per-served-status
+poll pulse — see the Light Sensor Policy — into the single flag, so the
+SSE callback never races a poller's pulse), and the automation editor
+(`setEditorOpen`, driven by `AutomationSource.illuminance`'s collection —
+see Screen Source Seams) — any one registers the listener; the last close
+unregisters AND resets the published reading to null and the smoother's
+state, so a stale lux value never lingers and the next reading is always
+a first sample.
+Smoothing is delegated wholesale to the Light Sensor Policy (this class
+owns no numbers, only gates); events are serialized by the monitor's lock
+so a gate flip racing a sensor event cannot interleave state swaps.
+
+### Light Sensor Policy
+**`camera/model/LightSensorPolicy.kt`** — the pure smoothing/hysteresis
+half of the monitor, JVM-tested with no Android imports: exponential
+smoothing (alpha 0.25) over bounded raw floats (0..100000 lux, the
+StreamDefaults range the catalogs and the OpenAPI schema pin), then an
+integer publish gate that must clear BOTH a relative hysteresis
+(`max(1 lux, 1% of the published value)`) and a 400 ms same-direction
+debounce before the published integer moves — sensor jitter and brief
+flickers around an automation threshold cost one event instead of a
+chatter storm. The FIRST reading after a registration is debounced the
+same way through `establish`: the opening sample only seeds a candidate
+(never published on its own, however plausible it reads), and the level
+must hold inside the candidate's hysteresis band for the 400 ms window
+before it goes live — a single raw sample reaches neither the overlay,
+the status API, nor an automation trigger. The state record
+(`smoothedLux`/`publishedLux`/`candidateLux`/`candidateSinceMs`) is
+immutable and returned per sample,
+so the monitor swaps it atomically and the whole pipeline is a fold. The
+same object also owns the dashboard gate's pure verdict
+(`dashboardDemand`): SSE client count > 0, or a plain `GET /api/status`
+served within `STATUS_PULSE_TTL_MS` (15 s) — every served status re-arms
+the window (`StatusWebHandler.get` → `onStatusServed`, stamped on the
+monotonic `SystemClock.elapsedRealtime`), so a poll cadence
+faster than the TTL reads live lux while a slower one reads null between
+windows; the expiry loop lives in `MainApplication`'s collector, the one
+writer the monitor's flag has.
 
 ### Quiet Hours Policy
 **`capture/QuietHoursPolicy.kt`** — the pure quiet-hours verdict for local
@@ -2568,6 +2621,21 @@ folds in `settings/DiagnosticsSection.kt`, rendered only when the route
 carries a paired device (parity is the local surface; diagnostics is the
 remote-only addition).
 
+The AutomationSource pair publishes the rule editor's live lux readout
+(`illuminance: StateFlow<AutomationIlluminance>`, the lux + sensor-verdict
+record whose `UNKNOWN` is the pre-answer value): collection IS the sensor's
+demand on both backends — locally the flow's `onStart`/`onCompletion` drive
+the monitor's editor gate (the initial value carries the sensor verdict, so
+a phone without the sensor reads "no sensor" from the first frame, never a
+flash of "waiting"); remotely a `GET /api/status` poll beat rides
+`ConsoleTimings.luxPollMs` (5 s, inside the status pulse TTL) and keeps the
+paired device's dashboard gate armed, holding the last reading through a
+failed poll. Only a rule editor whose draft reads light
+(`RuleDraft.readsIlluminance` — trigger or condition is the illuminance id)
+collects it; the ViewModel's `illuminanceReadout` maps the record onto the
+value/waiting/unavailable lines, and "no sensor" is claimed only on a known
+false verdict — silence waits.
+
 ### Self-Timer Runner
 **`camera/SelfTimerRunner.kt`** — the self-timer countdown's shared holder:
 the job + `CountdownState` machinery BOTH console backends run, extracted
@@ -2681,7 +2749,7 @@ send them back.
 **`automation/schedule/AutomationTriggerCatalog.kt`** — the WHEN side's
 closed vocabulary, mirroring the Automation Action Catalog's shape (same
 `AutomationParamSpec` schema type, additive-only ids pinned by a JVM test,
-per-type label dispatch at the UI seams). Nine trigger ids: `time_of_day`
+per-type label dispatch at the UI seams). Ten trigger ids: `time_of_day`
 (the default; special-cased — its "params" are the rule's top-level
 `minuteOfDay`/`daysMask`, so old payloads decode unchanged),
 `motion_detected`, `sound_detected`, `tamper_detected` (the three
@@ -2690,12 +2758,21 @@ default true = on the connect edge), `battery_level` (`level` INT 1..99
 default 20, `when_below` BOOL default true — the threshold-CROSSING
 verdict, not a level poll: fires when the previous level was on one side
 and the current is on the other; the first level after process start has
-no previous and never fires), `streaming_changed` (`streaming` BOOL),
-`viewers_changed` (`connected` BOOL — the viewer 0↔≥1 edge), and
-`app_started` (no params). It also defines the sealed `AutomationEvent`
-hierarchy the wiring hands the scheduler (`AppStarted`, `MotionDetected`,
-`SoundDetected`, `TamperDetected`, `ChargingChanged(charging)`,
-`BatteryLevelChanged(previous, current)`, `StreamingChanged(streaming)`,
+no previous and never fires), `illuminance` (`lux` INT 0..100000 default
+100, `when_below` BOOL default true — the same crossing verdict shared
+with the battery trigger through one `thresholdCrossed` fold, over the
+Light Sensor Monitor's smoothed integer lux, EXCEPT the first read of
+the process: a null previous cannot establish a crossing for the battery
+trigger, but the illuminance trigger evaluates its first sample on its
+own and fires when the app woke up already past the threshold — the
+boot-into-darkness dusk edge is exactly the scenario the trigger exists
+for), `streaming_changed`
+(`streaming` BOOL), `viewers_changed` (`connected` BOOL — the viewer
+0↔≥1 edge), and `app_started` (no params). It also defines the sealed
+`AutomationEvent` hierarchy the wiring hands the scheduler (`AppStarted`,
+`MotionDetected`, `SoundDetected`, `TamperDetected`,
+`ChargingChanged(charging)`, `BatteryLevelChanged(previous, current)`,
+`IlluminanceChanged(previous, current)`, `StreamingChanged(streaming)`,
 `ViewersChanged(connected)`) and `triggerMatches`' raw material:
 `sanitizeParams(triggerId, raw)` returns null for an unknown id or an
 unknown param key — a writer that believed in a parameter this build has
@@ -2708,14 +2785,15 @@ Automation Icon Vocabulary `icon` kind, published on the wire.
 ### Automation Condition Catalog
 **`automation/schedule/AutomationConditionCatalog.kt`** — the ONLY WHEN
 side's closed vocabulary, same catalog discipline as the trigger catalog:
-eleven condition ids with param schemas, additive-only and test-pinned.
+twelve condition ids with param schemas, additive-only and test-pinned.
 `time_window` (`start_minute` 0..1439 default 0, `end_minute` default 1439,
 `days_mask` 1..127 default 127 — a start > end window wraps across
 midnight via the same `MinuteWindow.covers` the arm schedule uses, while
 start == end covers nothing), `charging`/`wifi_connected` (BOOL state
-matches), `battery_level`/`viewers` (optional inclusive `min_`/`max_`
-ranges — one-sided when only one bound is present; an unknown battery
-level is never met rather than guessed), `power_save`, `streaming`,
+matches), `battery_level`/`illuminance`/`viewers` (optional inclusive
+`min_`/`max_` ranges — one-sided when only one bound is present; an
+unknown battery level or an unsampled lux reading is never met rather
+than guessed), `power_save`, `streaming`,
 `torch`, `recording`, `thermal` (normal vs throttling), and
 `motion_detection` (the toggle state). `sanitizeCondition` drops an
 unknown id or unknown param key entirely — an unknown condition is
@@ -2741,7 +2819,7 @@ this block by the three-way contract fixtures
 (`DtoContractFixtureTest` ↔ `web/contract/automation.json` ↔
 `web/src/contract.test.ts`), which is the fence that retired the old
 hand-mirror. The icon KINDS and picker GROUPS ride the same principle:
-`automation/schedule/AutomationIconVocabulary.kt` is the closed 29-kind
+`automation/schedule/AutomationIconVocabulary.kt` is the closed 31-kind
 set every catalog entry publishes (the app's `AutomationVisuals` maps
 kind → drawable, the web's `automationIcons.tsx` maps kind → glyph), and
 the `group` ids (`AutomationTriggerCatalog.GROUP_*` and friends) are the
@@ -2753,13 +2831,15 @@ member lists by filtering the catalogs, no hand lists.
 class both rule families evaluate conditions against: the clock triple
 (`minuteOfDay`/`epochDay`/`isoDayIndex`, the same wall-clock space the
 schedule policy keys occurrences in) plus the live-state fields —
-`charging`, `batteryLevel: Int?` (null = unknown), `powerSave`,
+`charging`, `batteryLevel: Int?` (null = unknown), `illuminanceLux: Int?`
+(null = unsampled), `powerSave`,
 `wifiConnected`, `streamingActive`, `viewerCount`, `torchOn`,
 `recordingActive`, `thermalNormal`, `motionDetectionEnabled`. Built by the
 `AutomationSensorSnapshotProvider` fun interface, whose production
 implementation lives in the Automation Event Wiring (it reads the app's
 existing flows/pulls — PowerManager, ConnectivityMonitor, ThermalMonitor,
-StreamingManager, CameraService, RecordingController, the Settings Store)
+StreamingManager, CameraService, RecordingController, the Settings Store,
+the Light Sensor Monitor)
 and whose tests substitute a fixed snapshot, keeping the condition policy
 JVM-testable with no Android imports.
 
@@ -2824,8 +2904,9 @@ rule window is the authority and every action rides), all measured in the
 same wall-clock minute space as the keys because a real-epoch comparison
 would smear the window by the zone offset); `eventDue` + `triggerMatches` for
 event rules (the trigger matches the AutomationEvent — including the
-battery-crossing verdict computed purely from
-`BatteryLevelChanged(previous, current)` — the Automation Condition Policy
+threshold-crossing verdict computed purely from
+`BatteryLevelChanged(previous, current)` /
+`IlluminanceChanged(previous, current)` — the Automation Condition Policy
 holds on the snapshot taken at event time, and the per-rule cooldown has
 elapsed: the journal is consulted with the dual-value convention below, a
 time-occurrence key never suppresses an event fire); `sanitizeRule`/
@@ -2845,7 +2926,12 @@ an absent optional param leaves its field unchanged). A rule whose whole
 action list is filtered away never fires partially and is not journaled,
 so its one-shot can still catch up on a later tick within grace. Event
 rules have no catch-up filter: an event is NOW, so all actions run —
-including ONESHOT ones.
+including ONESHOT ones. The demand gate's boolean half is pure here too:
+`readsIlluminance(rule)` and `lightSensorDemand(automationEnabled, rules)`
+(the engine-on + at-least-one-illuminance-reading-rule verdict
+`MainApplication.initializeLightSensorDemand` feeds the monitor) are
+catalog-reading folds with no scheduler state, so the automation side of
+the sensor's demand is JVM-tested like every other verdict.
 
 ### EVENT_JOURNAL_THRESHOLD (journal dual-value convention)
 **`AutomationSchedulePolicy.EVENT_JOURNAL_THRESHOLD` (10⁹)** — one journal
@@ -2920,7 +3006,7 @@ corrupt journal costs at most one re-fire, never a lost one.
 
 ### Automation Event Wiring
 **`automation/AutomationEventWiring.kt`** — the live-event half of the
-engine's inputs, started from MainApplication next to the scheduler: five
+engine's inputs, started from MainApplication next to the scheduler: six
 collectors that translate the app's existing streams into
 `AutomationEvent`s for `scheduler.onEvent`. Detection events ride the
 Detection Event Store's flow, decoded by wire name into motion/sound/
@@ -2928,7 +3014,16 @@ tamper (unknown kinds dropped); power arrives from PowerManager as
 charger connect/disconnect EDGES (seeded from the live state once at
 start, so the current state never replays as a spurious edge) and
 battery-percentage changes (the crossing verdict stays in the policy —
-the wiring only forwards previous/current); streaming start/stop edges
+the wiring only forwards previous/current); illuminance changes come
+from the Light Sensor Monitor's published lux flow, likewise
+previous/current — with the deliberate asymmetry that a null published
+reading RESETS the baseline: the sensor is demand-gated and publishes
+null whenever its last gate closes, so the next reading is always a
+first sample and reaches the scheduler as unknown→current (restarting
+into darkness, or switching automation back on in darkness, fires
+"light drops below" once with no crossing); the battery flow never
+publishes null after its first level, so it keeps the last level as
+the baseline; streaming start/stop edges
 and the viewer 0↔≥1 edge come from StreamingManager's flows, likewise
 seed-suppressed. The wiring also owns the production
 AutomationSensorSnapshotProvider (see Automation Sensor Snapshot), so
@@ -3260,6 +3355,7 @@ contracts.
 | `ZoomIndicatorState` | CameraScreen `zoomIndicator` (the gesture writes and the retire timer both land here) | `camera/model/ZoomIndicatorState.kt` | Hidden / Visible(ratio) | the whole state is the retire effect's key, so every pinch write re-arms the hide deadline — the retired flag+float pair's exit transition was dead and the pill never left the viewfinder |
 | `SessionDemand` | `CameraService` via `updateDemand` (Main only) | `camera/model/SessionDemand.kt` | previewRequested / exclusiveSessionRefCount / keepAliveRefCount / isActivityForeground / currentPreviewView | ONE immutable record swapped copy-on-write; `demandState()` maps it to the arbiter's `CameraDemandState`; `release()` intentionally does NOT reset keepAliveRefCount (documented decision) |
 | `SpiritLevelMonitor.Registration` | `SpiritLevelMonitor` (private) | `camera/SpiritLevelMonitor.kt` | Attached(sensor) / NoSensor / Detached | "registered" is derived from the two gates, not stored; the no-accelerometer verdict is memoized |
+| `LightSensorMonitor.registered` | `LightSensorMonitor` (lock-confined Boolean) | `camera/LightSensorMonitor.kt` | Registered / Unregistered over the demand gates (automation / overlay+stream/preview / dashboard — SSE count or status-poll pulse / editor open) | registration re-derives from the gate booleans per flip, one register/unregister per edge; the last close resets the published lux AND the smoother state — a stale reading never survives a gate close, so the next reading is always a first sample |
 | `StreamStartOutcome` | `StreamToggle` | `camera/model/StreamToggle.kt` | Started / Stopped / Disabled / StartFailed / BeginFailedRolledBack | the gate→start→begin→rollback ladder, exactly once; a failed session begin rolls back the just-started output |
 
 ### Capture

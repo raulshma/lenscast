@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Lens
 import androidx.compose.material.icons.filled.Lightbulb
+import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Nightlight
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.PhotoCamera
@@ -123,6 +124,9 @@ internal object AutomationVisuals {
         AutomationIconVocabulary.BATTERY_ALERT to EntryVisual(
             Icons.Filled.BatteryAlert, R.string.automation_trigger_desc_battery,
         ),
+        AutomationIconVocabulary.LIGHT_SENSOR to EntryVisual(
+            Icons.Filled.LightMode, R.string.automation_trigger_desc_illuminance,
+        ),
         AutomationIconVocabulary.CAST to EntryVisual(
             Icons.Filled.Cast, R.string.automation_trigger_desc_streaming,
         ),
@@ -178,6 +182,9 @@ internal object AutomationVisuals {
         ),
         AutomationIconVocabulary.BATTERY to EntryVisual(
             Icons.Filled.BatteryStd, R.string.automation_condition_desc_battery,
+        ),
+        AutomationIconVocabulary.LIGHT_SENSOR to EntryVisual(
+            Icons.Filled.LightMode, R.string.automation_condition_desc_illuminance,
         ),
         AutomationIconVocabulary.BATTERY_SAVER to EntryVisual(
             Icons.Filled.BatterySaver, R.string.automation_condition_desc_power_save,

@@ -166,6 +166,7 @@ data class StreamingSettingsDto(
     val showBranding: Boolean = OverlaySettings.DEFAULT.showBranding,
     val brandingText: String = OverlaySettings.DEFAULT.brandingText,
     val showStatus: Boolean = OverlaySettings.DEFAULT.showStatus,
+    val showIlluminance: Boolean = OverlaySettings.DEFAULT.showIlluminance,
     val showCustomText: Boolean = OverlaySettings.DEFAULT.showCustomText,
     val customText: String = OverlaySettings.DEFAULT.customText,
     val overlayPosition: String = OverlaySettings.DEFAULT.position.name,
@@ -572,6 +573,10 @@ data class StatusResponseDto(
      * reported stats. Absent on pre-issue-25 firmware.
      */
     val whepStream: WhepStreamStatusDto? = null,
+    /** Smoothed ambient illuminance; absent while no demand gate is active or no sample has arrived. */
+    val illuminanceLux: Int? = null,
+    /** Whether the device exposes an ambient-light sensor. */
+    val lightSensorAvailable: Boolean = false,
 )
 
 /** A device control range, min inclusive / max inclusive. */

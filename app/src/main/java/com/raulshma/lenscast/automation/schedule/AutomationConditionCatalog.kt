@@ -42,6 +42,7 @@ object AutomationConditionCatalog {
     const val TIME_WINDOW = "time_window"
     const val CHARGING = "charging"
     const val BATTERY_LEVEL = "battery_level"
+    const val ILLUMINANCE = "illuminance"
     const val POWER_SAVE = "power_save"
     const val WIFI_CONNECTED = "wifi_connected"
     const val STREAMING = "streaming"
@@ -196,6 +197,29 @@ object AutomationConditionCatalog {
             ),
             group = GROUP_CONNECTIVITY,
             icon = AutomationIconVocabulary.PEOPLE,
+        ),
+        AutomationConditionType(
+            id = ILLUMINANCE,
+            params = listOf(
+                AutomationParamSpec(
+                    name = "min_lux",
+                    kind = ParamKind.INT,
+                    min = StreamDefaults.LIGHT_SENSOR_MIN_LUX.toDouble(),
+                    max = StreamDefaults.LIGHT_SENSOR_MAX_LUX.toDouble(),
+                    optional = true,
+                    defaultValue = "",
+                ),
+                AutomationParamSpec(
+                    name = "max_lux",
+                    kind = ParamKind.INT,
+                    min = StreamDefaults.LIGHT_SENSOR_MIN_LUX.toDouble(),
+                    max = StreamDefaults.LIGHT_SENSOR_MAX_LUX.toDouble(),
+                    optional = true,
+                    defaultValue = "",
+                ),
+            ),
+            group = GROUP_DEVICE_STATE,
+            icon = AutomationIconVocabulary.LIGHT_SENSOR,
         ),
         AutomationConditionType(
             id = TORCH,

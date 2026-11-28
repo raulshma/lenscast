@@ -603,6 +603,7 @@
     <string name="automation_param_motion">Детекция движения</string>
     <string name="automation_param_sound">Детекция звука</string>
     <string name="automation_param_enabled">Включено</string>
+    <string name="automation_param_type_value">Введите значение</string>
     <string name="automation_summary_torch_on">Фонарик включён</string>
     <string name="automation_summary_torch_off">Фонарик выключен</string>
     <string name="automation_summary_torch_strength">Яркость фонарика %1$s</string>
@@ -636,6 +637,7 @@
     <string name="automation_trigger_motion">Обнаружено движение</string>
     <string name="automation_trigger_sound">Обнаружен звук</string>
     <string name="automation_trigger_tamper">Вскрытие (отключение питания)</string>
+    <string name="automation_trigger_illuminance">Переход порога освещённости</string>
     <string name="automation_trigger_charging">Подключение / отключение зарядки</string>
     <string name="automation_trigger_battery">Порог заряда батареи</string>
     <string name="automation_trigger_streaming">Старт / остановка трансляции</string>
@@ -644,6 +646,8 @@
     <string name="automation_summary_trigger_motion">При обнаружении движения</string>
     <string name="automation_summary_trigger_sound">При обнаружении звука</string>
     <string name="automation_summary_trigger_tamper">При вскрытии (отключении питания)</string>
+    <string name="automation_summary_trigger_illuminance_below">Когда освещённость падает до %1$s лк</string>
+    <string name="automation_summary_trigger_illuminance_above">Когда освещённость превышает %1$s лк</string>
     <string name="automation_summary_trigger_charging_on">При подключении зарядки</string>
     <string name="automation_summary_trigger_charging_off">При отключении зарядки</string>
     <string name="automation_summary_trigger_battery_below">Когда заряд батареи падает до %1$s%%</string>
@@ -657,6 +661,7 @@
     <!-- Параметры триггеров -->
     <string name="automation_param_battery_threshold">Заряд батареи (%)</string>
     <string name="automation_param_when_below">При падении</string>
+    <string name="automation_param_lux_threshold">Уровень освещённости (лк)</string>
     <string name="automation_param_charging_plugged">Зарядка</string>
     <string name="automation_param_streaming_active">Трансляция</string>
     <string name="automation_param_viewers_connected">Зритель присутствует</string>
@@ -665,6 +670,7 @@
     <string name="automation_condition_time_window">Интервал времени</string>
     <string name="automation_condition_charging">Состояние зарядки</string>
     <string name="automation_condition_battery">Заряд батареи</string>
+    <string name="automation_condition_illuminance">Освещённость</string>
     <string name="automation_condition_power_save">Энергосбережение</string>
     <string name="automation_condition_wifi">Wi-Fi подключён</string>
     <string name="automation_condition_streaming">Идёт трансляция</string>
@@ -678,6 +684,8 @@
     <string name="automation_param_window_days">Дни</string>
     <string name="automation_param_battery_min">Минимум (%)</string>
     <string name="automation_param_battery_max">Максимум (%)</string>
+    <string name="automation_param_lux_min">Минимум (лк)</string>
+    <string name="automation_param_lux_max">Максимум (лк)</string>
     <string name="automation_param_power_save_on">Энергосбережение включено</string>
     <string name="automation_param_wifi_connected">Подключено</string>
     <string name="automation_param_viewers_min">Минимум зрителей</string>
@@ -692,6 +700,10 @@
     <string name="automation_summary_condition_battery_min">Заряд ≥ %1$s%%</string>
     <string name="automation_summary_condition_battery_max">Заряд ≤ %1$s%%</string>
     <string name="automation_summary_condition_battery_any">Заряд: любой уровень</string>
+    <string name="automation_summary_condition_illuminance_between">Освещённость %1$s–%2$s лк</string>
+    <string name="automation_summary_condition_illuminance_min">Освещённость ≥ %1$s лк</string>
+    <string name="automation_summary_condition_illuminance_max">Освещённость ≤ %1$s лк</string>
+    <string name="automation_summary_condition_illuminance_any">Освещённость: любое значение</string>
     <string name="automation_summary_condition_power_save_on">Пока включено энергосбережение</string>
     <string name="automation_summary_condition_power_save_off">Пока энергосбережение выключено</string>
     <string name="automation_summary_condition_wifi_on">Пока Wi-Fi подключён</string>
@@ -728,6 +740,11 @@
     <string name="automation_missed_window">В пределах окна</string>
     <string name="automation_editor_missed_window">Окно догона</string>
     <string name="automation_editor_window_wrap_hint">Окно, переходящее через полночь (от &gt; до), продолжается на следующий день</string>
+
+    <!-- Редактор автоматизации: текущая освещённость рядом с порогом или условием в люксах -->
+    <string name="automation_illuminance_now">Текущая освещённость: %1$s лк</string>
+    <string name="automation_illuminance_unavailable">Датчик освещённости недоступен.</string>
+    <string name="automation_illuminance_waiting">Ожидание показания освещённости…</string>
 
     <!-- Экран автоматизации: карточка движка, карточки правил, пустое состояние -->
     <string name="automation_master_section_title">Движок</string>
@@ -790,6 +807,7 @@
     <string name="automation_trigger_desc_motion">Срабатывает, когда детектор движения замечает движение</string>
     <string name="automation_trigger_desc_sound">Срабатывает, когда детектор звука улавливает шум</string>
     <string name="automation_trigger_desc_tamper">Срабатывает при срабатывании датчика вмешательства (отключение питания)</string>
+    <string name="automation_trigger_desc_illuminance">Срабатывает, когда освещённость пересекает порог в люксах</string>
     <string name="automation_trigger_desc_charging">Срабатывает при подключении или отключении зарядного устройства</string>
     <string name="automation_trigger_desc_battery">Срабатывает, когда батарея пересекает заданный уровень</string>
     <string name="automation_trigger_desc_streaming">Срабатывает при запуске или остановке трансляции</string>
@@ -812,6 +830,7 @@
 
     <!-- Автоматизация: описания выбора, условия -->
     <string name="automation_condition_desc_time_window">Только в пределах ежедневного интервала, при желании в выбранные дни</string>
+    <string name="automation_condition_desc_illuminance">Только пока освещённость остаётся в диапазоне в люксах</string>
     <string name="automation_condition_desc_charging">Только при подключённом (или отключённом) зарядном устройстве</string>
     <string name="automation_condition_desc_battery">Только когда батарея выше и/или ниже заданного уровня</string>
     <string name="automation_condition_desc_power_save">Только при включённом (или выключенном) энергосбережении</string>

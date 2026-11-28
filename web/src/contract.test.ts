@@ -91,6 +91,7 @@ const AUTOMATION_TRIGGER_IDS = [
   'motion_detected',
   'sound_detected',
   'tamper_detected',
+  'illuminance',
   'charging_changed',
   'battery_level',
   'streaming_changed',
@@ -107,6 +108,7 @@ const AUTOMATION_CONDITION_IDS = [
   'wifi_connected',
   'streaming',
   'viewers',
+  'illuminance',
   'torch',
   'recording',
   'thermal',
@@ -124,7 +126,7 @@ const AUTOMATION_ICON_VOCABULARY: readonly AutomationIconVocabulary[] = [
   'power', 'battery_alert', 'battery', 'battery_saver', 'shield',
   'cast', 'eye', 'rocket', 'broadcast', 'stream', 'people', 'wifi',
   'exposure', 'tonality', 'zoom', 'speed', 'lens', 'camera',
-  'torch', 'lightbulb', 'siren', 'nightlight', 'videocam', 'record', 'thermostat',
+  'torch', 'lightbulb', 'light_sensor', 'siren', 'nightlight', 'videocam', 'record', 'thermostat',
 ]
 
 /** The documented picker group ids per catalog (WebApiDtos/catalog docs). */
@@ -196,6 +198,8 @@ describe('DTO contract fixtures', () => {
     expectKeys(settings.camera as unknown as Record<string, unknown>, CAMERA_KEYS)
     expectKeys(settings.streaming as unknown as Record<string, unknown>, STREAMING_KEYS)
     expect(Array.isArray(settings.streaming.maskingZones)).toBe(true)
+    expect(settings.streaming.showIlluminance).toBe(false)
+    expect(API_DEFAULTS.showIlluminance).toBe(false)
   })
 
   it('UI layout fixture assigns to WebUiLayoutDto', () => {
@@ -263,6 +267,11 @@ describe('DTO contract fixtures', () => {
     expectKeys(status.watchdog as unknown as Record<string, unknown>, keysOf(statusFixture.watchdog))
     expectKeys(status.encodedStream as unknown as Record<string, unknown>, keysOf(statusFixture.encodedStream))
     expectKeys(status.whepStream as unknown as Record<string, unknown>, keysOf(statusFixture.whepStream))
+    expect(status.illuminanceLux).toBe(320)
+    expect(status.lightSensorAvailable).toBe(true)
+    // The pre-answer defaults hold the unknown verdict, not an absence claim.
+    expect(API_DEFAULTS.illuminanceLux).toBeNull()
+    expect(API_DEFAULTS.lightSensorAvailable).toBeNull()
   })
 
   it('gallery fixture assigns to GalleryResponse', () => {
@@ -333,6 +342,7 @@ describe('DTO contract fixtures', () => {
     // settings fixture pins.
     const settings: AllSettings = exportFile.settings as AllSettings
     expectKeys(settings as unknown as Record<string, unknown>, keysOf(settingsExportFixture.settings))
+    expect(settings.streaming.showIlluminance).toBe(false)
   })
 
   it('detection test fixture assigns to DetectionTestResponse', () => {
@@ -448,8 +458,8 @@ describe('DTO contract fixtures', () => {
       }
     }
     // The same completeness contract for the trigger and condition catalogs.
-    expect(automation.triggers.map((entry) => entry.id)).toEqual(expect.arrayContaining(AUTOMATION_TRIGGER_IDS))
-    expect(automation.conditions.map((entry) => entry.id)).toEqual(expect.arrayContaining(AUTOMATION_CONDITION_IDS))
+    expect(automation.triggers.map((entry) => entry.id)).toEqual(AUTOMATION_TRIGGER_IDS)
+    expect(automation.conditions.map((entry) => entry.id)).toEqual(AUTOMATION_CONDITION_IDS)
     for (const [entries, documentedGroups] of [
       [automation.triggers, AUTOMATION_GROUP_IDS.triggers],
       [automation.conditions, AUTOMATION_GROUP_IDS.conditions],
@@ -495,6 +505,19 @@ describe('DTO contract fixtures', () => {
       expect(param.autoAtZero).toBe(true)
     }
     expect(automation.catalog.find((entry) => entry.id === 'recording')?.params.find((param) => param.name === 'duration_seconds')?.autoAtZero).toBe(false)
+
+    const luxTrigger = automation.triggers.find((entry) => entry.id === 'illuminance')
+    expect(luxTrigger).toMatchObject({ group: 'device_events', icon: 'light_sensor' })
+    expect(luxTrigger!.params).toEqual([
+      { name: 'lux', kind: 'INT', min: 0, max: 100_000, optional: false, defaultValue: '100', autoAtZero: false },
+      { name: 'when_below', kind: 'BOOL', optional: false, defaultValue: 'true', autoAtZero: false },
+    ])
+    const illuminance = automation.conditions.find((entry) => entry.id === 'illuminance')
+    expect(illuminance).toMatchObject({ group: 'device_state', icon: 'light_sensor' })
+    expect(illuminance!.params).toEqual([
+      { name: 'min_lux', kind: 'INT', min: 0, max: 100_000, optional: true, defaultValue: '', autoAtZero: false },
+      { name: 'max_lux', kind: 'INT', min: 0, max: 100_000, optional: true, defaultValue: '', autoAtZero: false },
+    ])
   })
 })
 

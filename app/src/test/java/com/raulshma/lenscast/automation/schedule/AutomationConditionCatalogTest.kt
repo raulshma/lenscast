@@ -23,6 +23,7 @@ class AutomationConditionCatalogTest {
                 "wifi_connected",
                 "streaming",
                 "viewers",
+                "illuminance",
                 "torch",
                 "recording",
                 "thermal",
@@ -53,6 +54,13 @@ class AutomationConditionCatalogTest {
 
         val viewers = AutomationConditionCatalog.typeFor(AutomationConditionCatalog.VIEWERS)!!
         assertEquals(listOf("min_count", "max_count"), viewers.params.map { it.name })
+
+        val illuminance = AutomationConditionCatalog.typeFor(AutomationConditionCatalog.ILLUMINANCE)!!
+        assertEquals(AutomationIconVocabulary.LIGHT_SENSOR, illuminance.icon)
+        assertEquals(listOf("min_lux", "max_lux"), illuminance.params.map { it.name })
+        assertTrue(illuminance.params.all { it.optional && it.defaultValue.isEmpty() })
+        assertEquals(0.0, illuminance.params[0].min!!, 0.0)
+        assertEquals(100_000.0, illuminance.params[1].max!!, 0.0)
     }
 
     @Test

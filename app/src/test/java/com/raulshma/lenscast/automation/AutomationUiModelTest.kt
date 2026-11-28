@@ -361,8 +361,15 @@ class AutomationUiModelTest {
             R.string.automation_action_unknown,
             AutomationViewModel.triggerTypeLabelRes("bogus"),
         )
+        assertEquals(
+            R.string.automation_trigger_illuminance,
+            AutomationViewModel.triggerTypeLabelRes(AutomationTriggerCatalog.ILLUMINANCE),
+        )
         AutomationTriggerCatalog.ACTION_TYPES.forEach { type ->
-            AutomationViewModel.triggerTypeLabelRes(type.id) // every id resolvable
+            assertFalse(
+                "missing trigger label for ${type.id}",
+                AutomationViewModel.triggerTypeLabelRes(type.id) == R.string.automation_action_unknown,
+            )
         }
     }
 
@@ -376,9 +383,60 @@ class AutomationUiModelTest {
             R.string.automation_action_unknown,
             AutomationViewModel.conditionTypeLabelRes("bogus"),
         )
+        assertEquals(
+            R.string.automation_condition_illuminance,
+            AutomationViewModel.conditionTypeLabelRes(AutomationConditionCatalog.ILLUMINANCE),
+        )
         AutomationConditionCatalog.CONDITIONS.forEach { type ->
-            AutomationViewModel.conditionTypeLabelRes(type.id)
+            assertFalse(
+                "missing condition label for ${type.id}",
+                AutomationViewModel.conditionTypeLabelRes(type.id) == R.string.automation_action_unknown,
+            )
         }
+    }
+
+    @Test
+    fun `every catalog param reads as its own row on its editor`() {
+        // A param with no label of its own falls to the generic "Enabled"
+        // row — which is how the lux thresholds once rendered here alone.
+        AutomationTriggerCatalog.ACTION_TYPES.forEach { type ->
+            type.params.forEach { param ->
+                assertNotEquals(
+                    "trigger ${type.id}/${param.name} has no label of its own",
+                    R.string.automation_param_enabled,
+                    AutomationViewModel.triggerParamLabelRes(type.id, param.name),
+                )
+            }
+        }
+        AutomationConditionCatalog.CONDITIONS.forEach { type ->
+            type.params.forEach { param ->
+                assertNotEquals(
+                    "condition ${type.id}/${param.name} has no label of its own",
+                    R.string.automation_param_enabled,
+                    AutomationViewModel.conditionParamLabelRes(type.id, param.name),
+                )
+            }
+        }
+    }
+
+    @Test
+    fun `illuminance params read as lux rows`() {
+        assertEquals(
+            R.string.automation_param_lux_threshold,
+            AutomationViewModel.triggerParamLabelRes(AutomationTriggerCatalog.ILLUMINANCE, "lux"),
+        )
+        assertEquals(
+            R.string.automation_param_when_below,
+            AutomationViewModel.triggerParamLabelRes(AutomationTriggerCatalog.ILLUMINANCE, "when_below"),
+        )
+        assertEquals(
+            R.string.automation_param_lux_min,
+            AutomationViewModel.conditionParamLabelRes(AutomationConditionCatalog.ILLUMINANCE, "min_lux"),
+        )
+        assertEquals(
+            R.string.automation_param_lux_max,
+            AutomationViewModel.conditionParamLabelRes(AutomationConditionCatalog.ILLUMINANCE, "max_lux"),
+        )
     }
 
     @Test
@@ -414,6 +472,30 @@ class AutomationUiModelTest {
         ).single()
         assertEquals(R.string.automation_summary_trigger_battery_above, above.res)
         assertEquals(listOf("80"), above.args)
+    }
+
+    @Test
+    fun `illuminance trigger summary reads the threshold and direction`() {
+        fun lineFor(vararg params: Pair<String, String>) = AutomationViewModel.triggerSummaryLines(
+            AutomationRule(
+                triggerType = AutomationTriggerKind.ILLUMINANCE,
+                triggerParams = mapOf(*params),
+            ),
+        ).single()
+
+        val below = lineFor("lux" to "25", "when_below" to "true")
+        assertEquals(R.string.automation_summary_trigger_illuminance_below, below.res)
+        assertEquals(listOf("25"), below.args)
+
+        val above = lineFor("lux" to "400", "when_below" to "false")
+        assertEquals(R.string.automation_summary_trigger_illuminance_above, above.res)
+        assertEquals(listOf("400"), above.args)
+
+        // An absent threshold reads the catalog default — the value the
+        // engine evaluates the rule with.
+        val defaulted = lineFor()
+        assertEquals(R.string.automation_summary_trigger_illuminance_below, defaulted.res)
+        assertEquals(listOf(StreamDefaults.LIGHT_SENSOR_TRIGGER_DEFAULT_LUX.toString()), defaulted.args)
     }
 
     @Test
@@ -465,6 +547,71 @@ class AutomationUiModelTest {
         assertEquals(
             R.string.automation_summary_condition_battery_any,
             lineFor().res,
+        )
+    }
+
+    @Test
+    fun `illuminance condition summary picks the bound shape`() {
+        fun lineFor(vararg params: Pair<String, String>) = AutomationViewModel.conditionSummaryLines(
+            AutomationConditionSpec(AutomationConditionCatalog.ILLUMINANCE, mapOf(*params)),
+        ).single()
+
+        val between = lineFor("min_lux" to "10", "max_lux" to "300")
+        assertEquals(R.string.automation_summary_condition_illuminance_between, between.res)
+        assertEquals(listOf("10", "300"), between.args)
+        assertEquals(R.string.automation_summary_condition_illuminance_min, lineFor("min_lux" to "10").res)
+        assertEquals(R.string.automation_summary_condition_illuminance_max, lineFor("max_lux" to "300").res)
+        assertEquals(R.string.automation_summary_condition_illuminance_any, lineFor().res)
+    }
+
+    @Test
+    fun `integer sliders keep a tick per value only up to the cap`() {
+        // One tick — and one snap position — per whole value.
+        assertEquals(0, AutomationViewModel.sliderSteps(0f, 1f, integer = true))
+        assertEquals(1, AutomationViewModel.sliderSteps(0f, 2f, integer = true))
+        assertEquals(99, AutomationViewModel.sliderSteps(0f, 100f, integer = true))
+        assertEquals(99, AutomationViewModel.sliderSteps(-50f, 50f, integer = true))
+        // Past the cap the track is continuous: each tick is a draw call per
+        // frame, and the value still lands whole through canonicalIntValue.
+        assertEquals(0, AutomationViewModel.sliderSteps(0f, 101f, integer = true))
+        assertEquals(0, AutomationViewModel.sliderSteps(0f, 100_000f, integer = true))
+        // A float track never ticks by step.
+        assertEquals(0, AutomationViewModel.sliderSteps(0f, 1f, integer = false))
+    }
+
+    @Test
+    fun `the typed entry opens on the same boundary that drops the ticks`() {
+        assertFalse(AutomationViewModel.sliderIsWide(0f, 100f))
+        assertTrue(AutomationViewModel.sliderIsWide(0f, 101f))
+        assertTrue(AutomationViewModel.sliderIsWide(0f, 100_000f))
+    }
+
+    @Test
+    fun `lux readout shows the reading, claims no sensor only on a known verdict, and otherwise waits`() {
+        val measured = AutomationViewModel.illuminanceReadout(AutomationIlluminance(lux = 120, sensorAvailable = true))
+        assertEquals(R.string.automation_illuminance_now, measured.res)
+        assertEquals(listOf("120"), measured.args)
+
+        assertEquals(
+            R.string.automation_illuminance_unavailable,
+            AutomationViewModel.illuminanceReadout(AutomationIlluminance(lux = null, sensorAvailable = false)).res,
+        )
+        // Silence is never "no sensor": a known sensor still debouncing its
+        // first reading waits...
+        assertEquals(
+            R.string.automation_illuminance_waiting,
+            AutomationViewModel.illuminanceReadout(AutomationIlluminance(lux = null, sensorAvailable = true)).res,
+        )
+        // ...and so does a device that has not answered, or is too old to
+        // publish the field at all.
+        assertEquals(
+            R.string.automation_illuminance_waiting,
+            AutomationViewModel.illuminanceReadout(AutomationIlluminance.UNKNOWN).res,
+        )
+        // A reading outranks the verdict.
+        assertEquals(
+            R.string.automation_illuminance_now,
+            AutomationViewModel.illuminanceReadout(AutomationIlluminance(lux = 120, sensorAvailable = false)).res,
         )
     }
 

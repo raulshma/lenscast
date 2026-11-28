@@ -237,12 +237,17 @@ object AutomationSchedulePolicy {
      * Whether [event] matches a rule's trigger: the trigger kind must be the
      * event's kind, and for parameterized triggers the event's payload must
      * match the configured parameter. [AutomationEvent.BatteryLevelChanged]
-     * matches on a threshold *crossing*: with `when_below = true` the level
-     * must move from above the threshold to at-or-below it (so a device
-     * holding steady at 21% with threshold 20 stays quiet and 21→20 fires
-     * exactly once), with `when_below = false` the mirror-image climb. A
-     * null previous level (first read of the process) cannot establish a
-     * crossing and never fires; [AutomationTriggerKind.TIME_OF_DAY] matches
+     * and [AutomationEvent.IlluminanceChanged] match on a threshold *crossing*:
+     * with `when_below = true` the reading must move from above the threshold
+     * to at-or-below it (so a device holding steady at 21% with threshold 20
+     * stays quiet and 21→20 fires exactly once), with `when_below = false` the
+     * mirror-image climb. A null previous reading means no sample preceded
+     * this one: the battery trigger cannot establish a crossing and never
+     * fires, while the illuminance trigger — whose whole point is reacting to
+     * the environment the app woke up into — *does* evaluate that first
+     * (debounced) reading on its own (the app restarted into darkness fires
+     * "light drops below"; the steady reading then sits on the fired side, so
+     * it stays quiet until a genuine re-cross). [AutomationTriggerKind.TIME_OF_DAY] matches
      * no event — its fires come only from [dueRules].
      */
     fun triggerMatches(
@@ -265,7 +270,14 @@ object AutomationSchedulePolicy {
             is AutomationEvent.ChargingChanged ->
                 triggerType == AutomationTriggerKind.CHARGING_CHANGED && bool("charging") == event.charging
             is AutomationEvent.BatteryLevelChanged ->
-                triggerType == AutomationTriggerKind.BATTERY_LEVEL && batteryCrossed(triggerType, triggerParams, event)
+                triggerType == AutomationTriggerKind.BATTERY_LEVEL &&
+                    thresholdCrossed(triggerType, triggerParams, event.previous, event.current, "level")
+            is AutomationEvent.IlluminanceChanged ->
+                triggerType == AutomationTriggerKind.ILLUMINANCE &&
+                    thresholdCrossed(
+                        triggerType, triggerParams, event.previous, event.current, "lux",
+                        firstSampleFires = true,
+                    )
             is AutomationEvent.StreamingChanged ->
                 triggerType == AutomationTriggerKind.STREAMING_CHANGED && bool("streaming") == event.streaming
             is AutomationEvent.ViewersChanged ->
@@ -273,22 +285,64 @@ object AutomationSchedulePolicy {
         }
     }
 
-    /** The battery threshold-crossing verdict described in [triggerMatches]. */
-    private fun batteryCrossed(
+    /**
+     * The shared threshold-crossing verdict for battery and illuminance
+     * triggers. [firstSampleFires] promotes a null previous (no sample yet)
+     * from "never fires" to "fires when the current reading already sits on
+     * the target side". The light sensor is demand-gated, so for the
+     * illuminance trigger a null previous is the first debounced reading
+     * after every registration — the process start, and every time the
+     * engine or its last illuminance rule is switched back on — which makes
+     * the trigger level-sensitive at those edges: restarting into darkness
+     * fires "light drops below", and so does switching the automation back
+     * on in darkness (the state is re-applied, a one-shot action included).
+     * The battery trigger keeps the conservative never-fires semantics its
+     * documented contract pins (a boot-time level read is not an edge).
+     */
+    private fun thresholdCrossed(
         triggerType: AutomationTriggerKind,
         triggerParams: Map<String, String>,
-        event: AutomationEvent.BatteryLevelChanged,
+        previous: Int?,
+        current: Int,
+        thresholdParam: String,
+        firstSampleFires: Boolean = false,
     ): Boolean {
-        val previous = event.previous ?: return false
         val specs = AutomationTriggerCatalog.typeFor(triggerType.id)?.params ?: emptyList()
-        val threshold = AutomationParamValues.intValue(specs, triggerParams, "level") ?: return false
+        val threshold = AutomationParamValues.intValue(specs, triggerParams, thresholdParam) ?: return false
         val whenBelow = AutomationParamValues.boolValue(specs, triggerParams, "when_below")
+        if (previous == null) {
+            // No previous reading: when the trigger fires on its first
+            // sample, the verdict reduces to "the current reading already
+            // sits past the threshold"; the fired side becomes the baseline
+            // for later events, so a steady reading never re-fires. Otherwise
+            // there is no crossing to establish and the trigger stays quiet.
+            return firstSampleFires && if (whenBelow) current <= threshold else current > threshold
+        }
         return if (whenBelow) {
-            previous > threshold && event.current <= threshold
+            previous > threshold && current <= threshold
         } else {
-            previous <= threshold && event.current > threshold
+            previous <= threshold && current > threshold
         }
     }
+
+    /**
+     * Whether [rule] reads ambient light — the illuminance trigger, or an
+     * illuminance condition — and so needs the light sensor sampled while
+     * it is enabled.
+     */
+    fun readsIlluminance(rule: AutomationRule): Boolean =
+        rule.triggerType == AutomationTriggerKind.ILLUMINANCE ||
+            rule.conditions.any { it.type == AutomationConditionCatalog.ILLUMINANCE }
+
+    /**
+     * The light sensor's automation demand gate
+     * (com.raulshma.lenscast.camera.LightSensorMonitor): on only while the
+     * engine is enabled AND at least one enabled rule [readsIlluminance]. A
+     * disabled engine, or one whose enabled rules never mention light, keeps
+     * the sensor unregistered.
+     */
+    fun lightSensorDemand(automationEnabled: Boolean, rules: List<AutomationRule>): Boolean =
+        automationEnabled && rules.any { it.enabled && readsIlluminance(it) }
 
     /**
      * Clamp one rule into its persisted/usable shape: name trimmed;

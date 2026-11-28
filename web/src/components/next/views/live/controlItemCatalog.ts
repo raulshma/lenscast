@@ -41,6 +41,7 @@ const ITEM_LABEL_KEYS: Readonly<Record<string, string>> = {
   'overlay.timestamp': 'overlay.timestamp',
   'overlay.branding': 'overlay.branding',
   'overlay.status': 'overlay.status',
+  'overlay.illuminance': 'overlay.illuminance',
   'overlay.customText': 'overlay.custom',
   'overlay.style': 'next.inspector.item.overlay.style',
   'interval.status': 'interval.running',

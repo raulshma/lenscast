@@ -64,6 +64,8 @@ internal fun buildWebApiStack(
         cameraService = app.cameraService,
         streamWatchdog = app.streamWatchdog,
         settingsDataStore = app.settingsDataStore,
+        lightSensorMonitor = app.lightSensorMonitor,
+        onStatusServed = { app.onLightSensorStatusServed() },
     )
     val systemHandler = SystemWebHandler(
         context = context,
@@ -163,6 +165,9 @@ internal fun buildWebApiStack(
         automation = automationHandler,
         automationTest = automationTest,
         uiLayout = uiLayoutHandler,
+        onDashboardClientsChanged = { count ->
+            app.onLightSensorSseClients(count)
+        },
     )
 }
 

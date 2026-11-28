@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -61,17 +62,23 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -100,6 +107,7 @@ import com.raulshma.lenscast.ui.components.DayMaskChips
 import java.text.DateFormat
 import java.util.Date
 import java.util.TimeZone
+import kotlinx.coroutines.flow.StateFlow
 
 // The rule editor's non-UI state — the RuleDraft shape and its rule
 // conversion, the rotation-proof Saver, the auto-sentinel verdict, the
@@ -305,6 +313,7 @@ fun AutomationScreen(
         AutomationRuleEditor(
             draft = draft,
             torchStrengthMaxLevel = torchStrengthMaxLevel,
+            illuminance = viewModel.illuminance,
             onDraftChange = { editorDraft = it },
             onDismiss = { editorDraft = null },
             onSave = { saved ->
@@ -749,15 +758,29 @@ private enum class Picker {
  * remove affordances), and a live preview of the whole rule. Nothing
  * persists until Save; closing with unsaved edits asks first, and the draft
  * survives rotation through [RuleDraftSaver].
+ *
+ * [illuminance] feeds the live lux readout beside a lux trigger or
+ * condition ([RuleDraft.readsIlluminance]) — and is collected only while
+ * one is on the draft, because collecting it is what makes the source
+ * sample the light sensor.
  */
 @Composable
 private fun AutomationRuleEditor(
     draft: RuleDraft,
     torchStrengthMaxLevel: Int?,
+    illuminance: StateFlow<AutomationIlluminance>,
     onDraftChange: (RuleDraft) -> Unit,
     onDismiss: () -> Unit,
     onSave: (RuleDraft) -> Unit,
 ) {
+    // The live lux readout (issue #27), keyed on the draft's verdict so
+    // flipping the trigger away from light releases the source's sensor
+    // gate and flipping back re-collects — the web editor's own
+    // only-while-it-matters poll.
+    val readsIlluminance = draft.readsIlluminance
+    val reading by produceState(AutomationIlluminance.UNKNOWN, readsIlluminance) {
+        if (readsIlluminance) illuminance.collect { value = it }
+    }
     // The editor's four-phase machine: Closed / Open·clean / Open·dirty /
     // Open·dirty·confirming-discard. The draft rides the parent's saveable
     // editorDraft, so the dirty and confirming flags are saveable too —
@@ -931,6 +954,10 @@ private fun AutomationRuleEditor(
                             labelFor = AutomationViewModel::triggerParamLabelRes,
                         )
                     }
+                    // The measured light beside the threshold being dialed.
+                    if (draft.triggerType == AutomationTriggerCatalog.ILLUMINANCE) {
+                        IlluminanceReadout(reading)
+                    }
                     CooldownEditor(
                         cooldownSeconds = draft.cooldownSeconds,
                         onChange = { update(draft.copy(cooldownSeconds = it)) },
@@ -974,6 +1001,7 @@ private fun AutomationRuleEditor(
                 draft.conditions.forEachIndexed { index, condition ->
                     AutomationConditionEditorCard(
                         condition = condition,
+                        illuminance = reading,
                         onChange = { next ->
                             update(
                                 draft.copy(conditions = draft.conditions.toMutableList().also { it[index] = next }),
@@ -1399,11 +1427,13 @@ private fun AutomationOptionPickerDialog(
  * One condition inside the editor: the pretty type label, reorder and remove
  * affordances, and one param editor per catalog param — the time window's
  * bounds render as tappable time fields (not minute sliders) and its day
- * mask as chips.
+ * mask as chips. A condition that gates on light also shows the live lux
+ * readout ([IlluminanceReadout]) under its bounds.
  */
 @Composable
 private fun AutomationConditionEditorCard(
     condition: AutomationConditionSpec,
+    illuminance: AutomationIlluminance,
     onChange: (AutomationConditionSpec) -> Unit,
     onRemove: () -> Unit,
     onMoveUp: () -> Unit,
@@ -1502,8 +1532,29 @@ private fun AutomationConditionEditorCard(
                     labelFor = AutomationViewModel::conditionParamLabelRes,
                 )
             }
+            if (condition.type == AutomationConditionCatalog.ILLUMINANCE) {
+                IlluminanceReadout(illuminance)
+            }
         }
     }
+}
+
+/**
+ * The editor's live ambient-light line (issue #27): the measured reading
+ * beside the lux thresholds being dialed, so the number has a visible
+ * reference. The same words as the web editor's readout for the same
+ * states, and a polite live region — a changing reading is announced
+ * without stealing focus.
+ */
+@Composable
+private fun IlluminanceReadout(reading: AutomationIlluminance) {
+    val line = AutomationViewModel.illuminanceReadout(reading)
+    Text(
+        text = stringResource(line.res, *line.args.toTypedArray()),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+    )
 }
 
 /**
@@ -1783,6 +1834,8 @@ private fun MissedRunEditor(
  * - Other optional numerics (torch strength, durations): configure switch,
  *   then the slider; duration rows note the "0 = no limit" sentinel.
  * - Required numerics: the slider directly.
+ * - Wide INT spans (lux, durations, ISO): the slider goes continuous and
+ *   takes a typed value under it — see [AutomationNumericSlider].
  *
  * [labelFor] selects the label source per catalog (action, trigger, or
  * condition overrides); the editor body is catalog-agnostic.
@@ -1990,11 +2043,15 @@ private fun TorchStrengthEditor(
 }
 
 /**
- * The numeric slider row (title + live monospace value). INT sliders snap to
- * whole numbers via steps; FLOAT values round to one decimal. Canonical
- * strings come from the ViewModel's
- * [AutomationViewModel.canonicalIntValue]/[AutomationViewModel.canonicalFloatValue],
- * so what is shown is what persists.
+ * The numeric slider row (title + live monospace value). INT values land on
+ * whole numbers through [canonicalFor] whatever the tick count; ticks exist
+ * only while the span maps one per value ([AutomationViewModel.sliderSteps]
+ * — each is a draw call per frame, and a wide span's are undrawable and
+ * undialable anyway), and such a wide span also renders [TypedSliderValue].
+ * FLOAT values round to one decimal. Canonical strings come from the
+ * ViewModel's [AutomationViewModel.canonicalIntValue]/
+ * [AutomationViewModel.canonicalFloatValue], so what is shown is what
+ * persists.
  */
 @Composable
 private fun AutomationNumericSlider(
@@ -2012,7 +2069,7 @@ private fun AutomationNumericSlider(
         (spec?.max ?: 100.0).toFloat()
     }
     val isInt = spec == null || spec.kind == ParamKind.INT
-    val steps = if (isInt) ((maxF - minF).toInt() - 1).coerceAtLeast(0) else 0
+    val steps = AutomationViewModel.sliderSteps(minF, maxF, isInt)
     val current = (rawValue.toFloatOrNull() ?: minF).coerceIn(minF, maxF)
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
@@ -2039,7 +2096,57 @@ private fun AutomationNumericSlider(
             valueRange = minF..maxF,
             steps = steps,
         )
+        if (isInt && AutomationViewModel.sliderIsWide(minF, maxF)) {
+            TypedSliderValue(rawValue = rawValue, min = minF.toInt(), max = maxF.toInt(), onChange = onChange)
+        }
     }
+}
+
+/**
+ * The typed half of a wide-span INT slider: a numeric field under the track,
+ * because a thumb crossing a hundred thousand values moves in hundreds of
+ * lux per finger-width. Every parseable edit commits at once, clamped into
+ * the span — the field never holds a number the rule does not — and the
+ * field is re-seeded from the rule whenever the rule's value moves (the
+ * slider above, a cleared field regaining focus), which also normalizes a
+ * typed "05" to the canonical "5".
+ */
+@Composable
+private fun TypedSliderValue(
+    rawValue: String,
+    min: Int,
+    max: Int,
+    onChange: (String) -> Unit,
+) {
+    var typed by remember { mutableStateOf(rawValue) }
+    var focused by remember { mutableStateOf(false) }
+    // Sync external updates (slider drags or focus-loss normalization) without
+    // clobbering intermediate text like "05" while the user is actively typing.
+    LaunchedEffect(rawValue) {
+        val typedCanonical = typed.toIntOrNull()?.coerceIn(min, max)?.toString()
+        if (!focused || typedCanonical != rawValue) {
+            typed = rawValue
+        }
+    }
+    OutlinedTextField(
+        value = typed,
+        onValueChange = { next ->
+            val filtered = next.filter { it.isDigit() }
+            typed = filtered
+            filtered.toIntOrNull()?.let { digits ->
+                onChange(AutomationViewModel.canonicalIntValue(digits.coerceIn(min, max).toFloat()))
+            }
+        },
+        label = { Text(stringResource(R.string.automation_param_type_value)) },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        modifier = Modifier
+            .fillMaxWidth()
+            .onFocusChanged { state ->
+                focused = state.isFocused
+                if (!state.isFocused) typed = rawValue
+            },
+    )
 }
 
 /** Canonical wire string for a slider value per the spec's param kind. */

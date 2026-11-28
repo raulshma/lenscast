@@ -350,6 +350,29 @@
       "icon": "shield"
     },
     {
+      "id": "illuminance",
+      "params": [
+        {
+          "name": "lux",
+          "kind": "INT",
+          "min": 0.0,
+          "max": 100000.0,
+          "optional": false,
+          "defaultValue": "100",
+          "autoAtZero": false
+        },
+        {
+          "name": "when_below",
+          "kind": "BOOL",
+          "optional": false,
+          "defaultValue": "true",
+          "autoAtZero": false
+        }
+      ],
+      "group": "device_events",
+      "icon": "light_sensor"
+    },
+    {
       "id": "charging_changed",
       "params": [
         {
@@ -561,6 +584,31 @@
       ],
       "group": "connectivity",
       "icon": "people"
+    },
+    {
+      "id": "illuminance",
+      "params": [
+        {
+          "name": "min_lux",
+          "kind": "INT",
+          "min": 0.0,
+          "max": 100000.0,
+          "optional": true,
+          "defaultValue": "",
+          "autoAtZero": false
+        },
+        {
+          "name": "max_lux",
+          "kind": "INT",
+          "min": 0.0,
+          "max": 100000.0,
+          "optional": true,
+          "defaultValue": "",
+          "autoAtZero": false
+        }
+      ],
+      "group": "device_state",
+      "icon": "light_sensor"
     },
     {
       "id": "torch",

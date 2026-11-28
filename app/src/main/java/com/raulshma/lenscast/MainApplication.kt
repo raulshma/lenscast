@@ -12,8 +12,11 @@ import com.raulshma.lenscast.automation.AutomationEventWiring
 import com.raulshma.lenscast.automation.AutomationSnapshotProvider
 import com.raulshma.lenscast.automation.AutomationTestController
 import com.raulshma.lenscast.automation.schedule.AutomationFireJournal
+import com.raulshma.lenscast.automation.schedule.AutomationSchedulePolicy
 import com.raulshma.lenscast.automation.schedule.AutomationScheduler
 import com.raulshma.lenscast.camera.CameraService
+import com.raulshma.lenscast.camera.LightSensorMonitor
+import com.raulshma.lenscast.camera.model.LightSensorPolicy
 import com.raulshma.lenscast.camera.model.StreamToggle
 import com.raulshma.lenscast.capture.BackupWorker
 import com.raulshma.lenscast.capture.DecryptedPhotoCache
@@ -82,14 +85,37 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import android.os.SystemClock
 import kotlin.system.exitProcess
 
 class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph, ReliabilityRelay {
     override val cameraService: CameraService by lazy { CameraService(this) }
+    override val lightSensorMonitor: LightSensorMonitor by lazy { LightSensorMonitor(this, scope = appScope) }
+
+    // The light sensor's dashboard-demand facts, owned here so exactly one
+    // collector writes the monitor's flag: the SSE transport's client count
+    // (join/leave) and the monotonic stamp of the last served plain status
+    // GET (a poller holds no SSE session — LightSensorPolicy.dashboardDemand
+    // is the verdict over the pair). elapsedRealtime, not the wall clock:
+    // a clock correction must neither stretch nor cut the pulse's TTL.
+    private val lightSensorSseClients = MutableStateFlow(0)
+    private val lightSensorStatusPollMs = MutableStateFlow(0L)
+
+    /** Called by the SSE transport on every dashboard client join/leave. */
+    override fun onLightSensorSseClients(count: Int) {
+        lightSensorSseClients.value = count
+    }
+
+    /** Called per served /api/status — arms the poller's demand pulse. */
+    override fun onLightSensorStatusServed() {
+        lightSensorStatusPollMs.value = SystemClock.elapsedRealtime()
+    }
+
     override val streamingManager: StreamingManager by lazy {
         StreamingManager(
             this,
@@ -102,6 +128,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph, R
             // the builder must take the manager as a value; reading
             // `streamingManager` here would re-enter this lazy and recurse.
             webApiStackFactory = { manager -> buildWebApiStack(manager, this) },
+            illuminance = { lightSensorMonitor.illuminanceLux.value },
         )
     }
     override val settingsDataStore: SettingsDataStore by lazy { SettingsDataStore(this) }
@@ -169,14 +196,16 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph, R
         )
     }
     // The automation screen's LOCAL backend: the settings store's automation
-    // surface, the fire journal's polled read, the test controller, and the
-    // camera's flash verdict — the AutomationViewModel's old collaborators.
+    // surface, the fire journal's polled read, the test controller, the
+    // camera's flash verdict, and the light sensor behind the editor's lux
+    // readout — the AutomationViewModel's old collaborators.
     override val localAutomationSource: com.raulshma.lenscast.automation.AutomationSource by lazy {
         com.raulshma.lenscast.automation.LocalAutomationSource(
             settingsDataStore = settingsDataStore,
             testController = automationTestController,
             fireJournal = automationFireJournal,
             torchMaxLevel = cameraService.torchStrengthMaxLevel,
+            lightSensorMonitor = lightSensorMonitor,
             scope = appScope,
         )
     }
@@ -567,6 +596,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph, R
                 cameraService,
                 recordingController,
                 settingsDataStore,
+                lightSensorMonitor,
             ),
         )
     }
@@ -579,6 +609,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph, R
             detectionEventStore = detectionEventStore,
             powerManager = powerManager,
             streamingManager = streamingManager,
+            lightSensorMonitor = lightSensorMonitor,
             scope = appScope,
         )
     }
@@ -656,6 +687,7 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph, R
         heartbeatController.start(appScope)
         wireFramePump()
         initializeStreamStateJournal()
+        initializeLightSensorDemand()
         initializeAutomationScheduler()
         initializeCrashLoopReset()
         initializeKeepAwake()
@@ -859,6 +891,53 @@ class MainApplication : Application(), SingletonImageLoader.Factory, AppGraph, R
             rtspActive = streamingManager.isRtspRunning,
             scope = appScope,
         ).start()
+    }
+
+    private fun initializeLightSensorDemand() {
+        appScope.launch {
+            combine(
+                settingsDataStore.automationEnabled,
+                settingsDataStore.automationRules,
+            ) { _, _ ->
+                settingsDataStore.automationEnabledFromDisk() to
+                    settingsDataStore.automationRulesFromDisk()
+            }.collectLatest { (enabled, rules) ->
+                lightSensorMonitor.setAutomationDemand(
+                    AutomationSchedulePolicy.lightSensorDemand(enabled, rules),
+                )
+            }
+        }
+        appScope.launch {
+            combine(
+                settingsDataStore.overlaySettings,
+                streamingManager.isStreaming,
+            ) { _, streaming ->
+                settingsDataStore.overlaySettingsFromDisk() to streaming
+            }.collectLatest { (overlay, streaming) ->
+                lightSensorMonitor.setOverlayEnabled(overlay.enabled && overlay.showIlluminance)
+                lightSensorMonitor.setStreamingActive(streaming)
+            }
+        }
+        // The dashboard gate's single writer: SSE client count, or a plain
+        // status GET inside the pulse TTL. The loop is what expires the
+        // pulse — combine only re-fires on value changes, so when the gate
+        // is held by the pulse alone this sleeps out the remainder, re-runs
+        // the verdict at the deadline, and releases the sensor; a fresh
+        // poll or an SSE join/leave re-fires the combine and cancels the
+        // sleep.
+        appScope.launch {
+            combine(lightSensorSseClients, lightSensorStatusPollMs) { clients, lastPoll ->
+                clients to lastPoll
+            }.collectLatest { (clients, lastPoll) ->
+                while (true) {
+                    val now = SystemClock.elapsedRealtime()
+                    val demanded = LightSensorPolicy.dashboardDemand(clients, lastPoll, now)
+                    lightSensorMonitor.setDashboardDemand(demanded)
+                    if (clients > 0 || !demanded) break
+                    delay((lastPoll + LightSensorPolicy.STATUS_PULSE_TTL_MS - now).coerceAtLeast(50))
+                }
+            }
+        }
     }
 
     /**

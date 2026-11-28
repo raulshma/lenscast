@@ -1,6 +1,7 @@
 package com.raulshma.lenscast.automation
 
 import com.raulshma.lenscast.automation.schedule.AutomationActionSpec
+import com.raulshma.lenscast.automation.schedule.AutomationConditionCatalog
 import com.raulshma.lenscast.automation.schedule.AutomationConditionSpec
 import com.raulshma.lenscast.automation.schedule.AutomationRule
 import com.raulshma.lenscast.automation.schedule.AutomationTriggerCatalog
@@ -50,6 +51,14 @@ data class RuleDraft(
 ) {
     /** Whether the editor renders the time field + day chips (vs trigger params). */
     val isTimeTrigger: Boolean get() = triggerType == AutomationTriggerCatalog.TIME_OF_DAY
+
+    /**
+     * Whether the editor shows the live lux readout — and so asks the source
+     * for a reading: the trigger fires on light, or a condition gates on it.
+     */
+    val readsIlluminance: Boolean
+        get() = triggerType == AutomationTriggerCatalog.ILLUMINANCE ||
+            conditions.any { it.type == AutomationConditionCatalog.ILLUMINANCE }
 
     fun toRule(): AutomationRule = AutomationRule(
         id = id,

@@ -2,15 +2,20 @@ package com.raulshma.lenscast.automation
 
 import com.raulshma.lenscast.automation.schedule.AutomationFireJournal
 import com.raulshma.lenscast.automation.schedule.AutomationRule
+import com.raulshma.lenscast.camera.LightSensorMonitor
 import com.raulshma.lenscast.data.SettingsDataStore
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.TestCoroutineScheduler
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.After
@@ -55,7 +60,12 @@ import org.junit.Test
  * from the test thread — the unconfined resumption lands inline right
  * there, never on the scheduler. Waiting on scheduler time for a parked
  * resumption remains the losing idiom: `advanceUntilIdle()` drains before
- * the continuation lands back.
+ * the continuation lands back there.
+ *
+ * The editor's lux readout (`illuminance`) rides the same scope, and its
+ * tests pin that collection IS the sensor's demand: the first subscriber
+ * opens the monitor's editor gate, the last one's subscribe grace expiring
+ * closes it — the one place here a virtual delay is walked by hand.
  */
 class LocalAutomationSourceTest {
 
@@ -63,15 +73,25 @@ class LocalAutomationSourceTest {
     private val testController: AutomationTestController = mockk(relaxed = true)
     private val fireJournal: AutomationFireJournal = mockk(relaxed = true)
 
+    /** The light sensor runtime — only its gate calls and its reading are read. */
+    private val lightSensorMonitor: LightSensorMonitor = mockk(relaxed = true)
+    private val lux = MutableStateFlow<Int?>(null)
+
+
     /** The store's shared flow — starts at the seeded placeholder, like the real share-in. */
     private val rulesFlow = MutableStateFlow<List<AutomationRule>>(emptyList())
     private val enabledFlow = MutableStateFlow(false)
     private val armedFlow = MutableStateFlow<String?>(null)
     private val torch = MutableStateFlow<Int?>(null)
 
-    /** Unconfined: the latch's collect processes every mutation inline, no drain to race. */
+    /**
+     * Unconfined: the latch's collect processes every mutation inline, no
+     * drain to race. The scheduler is kept by name so the readout's subscribe
+     * grace — a virtual delay on this scope — can be walked by hand.
+     */
+    private val scheduler = TestCoroutineScheduler()
     private val scopeJob = Job()
-    private val scope = CoroutineScope(UnconfinedTestDispatcher() + scopeJob)
+    private val scope = CoroutineScope(UnconfinedTestDispatcher(scheduler) + scopeJob)
 
     @Before
     fun setUp() {
@@ -79,6 +99,8 @@ class LocalAutomationSourceTest {
         every { store.automationEnabled } returns enabledFlow
         every { testController.armedRuleId } returns armedFlow
         every { fireJournal.load() } returns emptyMap()
+        every { lightSensorMonitor.illuminanceLux } returns lux
+        every { lightSensorMonitor.sensorAvailable } returns true
         // The store is hydrated by default; tests that need a different
         // snapshot re-stub this.
         coEvery { store.automationRulesFromDisk() } returns emptyList()
@@ -91,7 +113,7 @@ class LocalAutomationSourceTest {
     }
 
     private fun source(): LocalAutomationSource =
-        LocalAutomationSource(store, testController, fireJournal, torch, scope)
+        LocalAutomationSource(store, testController, fireJournal, torch, lightSensorMonitor, scope)
 
     @Test
     fun `placeholder replay arms from the disk snapshot, not from the shared flow`() = runTest {
@@ -200,6 +222,42 @@ class LocalAutomationSourceTest {
         diskRead.complete(listOf(RULE))
         assertTrue(latch.rulesReady.value)
         assertEquals(listOf(RULE), latch.automationRules.value)
+    }
+
+    @Test
+    fun `the lux readout opens the editor gate on collect and closes it once the grace lapses`() {
+        val source = source()
+        // Nobody collects yet: the value is the pre-reading one, and nothing
+        // has asked the sensor for a sample.
+        assertEquals(AutomationIlluminance(lux = null, sensorAvailable = true), source.illuminance.value)
+        verify(exactly = 0) { lightSensorMonitor.setEditorOpen(any()) }
+
+        val collector = scope.launch { source.illuminance.collect() }
+        verify(exactly = 1) { lightSensorMonitor.setEditorOpen(true) }
+
+        // The reading maps straight through, verdict riding along.
+        lux.value = 120
+        assertEquals(AutomationIlluminance(lux = 120, sensorAvailable = true), source.illuminance.value)
+
+        collector.cancel()
+        // Inside the subscribe grace the gate stays open — a configuration
+        // change's immediate resubscribe must not unregister the sensor and
+        // restart its debounce.
+        verify(exactly = 0) { lightSensorMonitor.setEditorOpen(false) }
+
+        // Past the source's 5 s grace the last collector's departure closes it.
+        scheduler.advanceTimeBy(5_001)
+        scheduler.runCurrent()
+        verify(exactly = 1) { lightSensorMonitor.setEditorOpen(false) }
+    }
+
+    @Test
+    fun `a phone without the sensor publishes that verdict before any reading`() {
+        every { lightSensorMonitor.sensorAvailable } returns false
+
+        // The readout reads "no sensor" from its first frame — never a flash
+        // of "waiting" while nothing can ever arrive.
+        assertEquals(AutomationIlluminance(lux = null, sensorAvailable = false), source().illuminance.value)
     }
 
     private companion object {

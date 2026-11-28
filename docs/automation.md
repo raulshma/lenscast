@@ -209,7 +209,7 @@ start-from-background note.
 
 ## Trigger catalog
 
-Nine trigger ids (AutomationTriggerCatalog; published read-only by GET
+Ten trigger ids (AutomationTriggerCatalog; published read-only by GET
 `/api/automation` as `triggers`). `time_of_day` is special-cased: its
 "params" are the rule's top-level `minuteOfDay`/`daysMask`.
 
@@ -221,6 +221,7 @@ Nine trigger ids (AutomationTriggerCatalog; published read-only by GET
 | `tamper_detected` | A tamper (power-cut) event | — |
 | `charging_changed` | The charger connect/disconnect edge | `charging` BOOL (default true = on connect; false = on disconnect) |
 | `battery_level` | The battery percentage **crosses** a threshold | `level` INT 1–99 (default 20), `when_below` BOOL (default true = crossing downward; false = crossing upward) |
+| `illuminance` | Ambient light **crosses** a lux threshold | `lux` INT 0–100000 (default 100), `when_below` BOOL (default true = crossing downward; false = crossing upward) |
 | `streaming_changed` | Streaming starts/stops | `streaming` BOOL (default true = on start) |
 | `viewers_changed` | The viewer count crosses 0↔≥1 | `connected` BOOL (default true = first viewer joins; false = last viewer leaves) |
 | `app_started` | The process starts (once per process, after rules load) | — |
@@ -231,9 +232,21 @@ true), or the mirror image — not on every one-percent wiggle at the
 boundary. The very first level seen after process start (unknown previous)
 never fires.
 
+`illuminance` is edge-detected the same way, with one deliberate
+half-difference: the light sensor is **demand-gated** (see
+docs/streaming.md's overlay section and CONTEXT.md's "Light Sensor
+Monitor"), so its flow publishes a null reading whenever the last demand
+gate closes — automation off, the overlay hidden, no dashboard client, no
+editor. That null RESETS the baseline, so the next reading is always a
+first sample and reaches the scheduler as "unknown previous → current":
+restarting into darkness, or re-enabling automation in darkness, fires
+"light drops below" once without a crossing, and a fresh reading then
+re-arms the edge. The battery flow never publishes null after its first
+level, so it keeps the last level as its baseline instead.
+
 ## Condition catalog
 
-Eleven condition ids (AutomationConditionCatalog; published as
+Twelve condition ids (AutomationConditionCatalog; published as
 `conditions`). Conditions are evaluated against a fresh snapshot at fire
 time — for time rules, on each tick; for event rules, at the event. An
 unknown condition id is simply never met.
@@ -243,6 +256,7 @@ unknown condition id is simply never met.
 | `time_window` | The snapshot minute is inside the window, on an armed day | `start_minute` INT 0–1439 (default 0), `end_minute` INT 0–1439 (default 1439), `days_mask` INT 1–127 (default 127). A window with start > end wraps across midnight (22:00→06:00); start == end covers nothing |
 | `charging` | Charger state matches | `charging` BOOL (default true) |
 | `battery_level` | The battery percentage is inside an optional inclusive range | `min_level`/`max_level` INT 0–100, optional; unknown battery level → unmet |
+| `illuminance` | Ambient light is inside an optional inclusive lux range | `min_lux`/`max_lux` INT 0–100000, optional; null reading (sensor unsampled — the demand gate is closed — or still debouncing) → unmet |
 | `power_save` | Power-save mode matches | `enabled` BOOL (default false) |
 | `wifi_connected` | Wi-Fi connectivity matches | `connected` BOOL (default true) |
 | `streaming` | Streaming state matches | `active` BOOL (default true) |

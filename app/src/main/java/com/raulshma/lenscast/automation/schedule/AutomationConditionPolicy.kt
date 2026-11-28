@@ -14,7 +14,7 @@ import com.raulshma.lenscast.capture.MotionArmingPolicy
  * Boolean conditions read their BOOL param as "the snapshot state must equal
  * this", so the same condition id serves both polarities (`charging.charging
  * = "false"` demands the device be unplugged). Range conditions
- * (battery/viewers) take optional bounds; an absent bound is unbounded on
+ * (battery/illuminance/viewers) take optional bounds; an absent bound is unbounded on
  * that side and both absent means trivially met. Unknown state (a null
  * battery level) is never guessed: the condition reads *not met*.
  */
@@ -48,18 +48,17 @@ object AutomationConditionPolicy {
             AutomationConditionCatalog.CHARGING -> snapshot.charging == bool("charging")
             AutomationConditionCatalog.BATTERY_LEVEL -> {
                 val level = snapshot.batteryLevel ?: return false
-                val min = int("min_level")
-                val max = int("max_level")
-                (min == null || level >= min) && (max == null || level <= max)
+                inRange(level, int("min_level"), int("max_level"))
+            }
+            AutomationConditionCatalog.ILLUMINANCE -> {
+                val lux = snapshot.illuminanceLux ?: return false
+                inRange(lux, int("min_lux"), int("max_lux"))
             }
             AutomationConditionCatalog.POWER_SAVE -> snapshot.powerSave == bool("enabled")
             AutomationConditionCatalog.WIFI_CONNECTED -> snapshot.wifiConnected == bool("connected")
             AutomationConditionCatalog.STREAMING -> snapshot.streamingActive == bool("active")
-            AutomationConditionCatalog.VIEWERS -> {
-                val min = int("min_count")
-                val max = int("max_count")
-                (min == null || snapshot.viewerCount >= min) && (max == null || snapshot.viewerCount <= max)
-            }
+            AutomationConditionCatalog.VIEWERS ->
+                inRange(snapshot.viewerCount, int("min_count"), int("max_count"))
             AutomationConditionCatalog.TORCH -> snapshot.torchOn == bool("on")
             AutomationConditionCatalog.RECORDING -> snapshot.recordingActive == bool("active")
             AutomationConditionCatalog.THERMAL -> snapshot.thermalNormal == bool("normal")
@@ -83,4 +82,8 @@ object AutomationConditionPolicy {
             else -> rule.conditions.all { isMet(it, snapshot) }
         }
     }
+
+    /** The shared optional-bounds verdict (inclusive both sides; one-sided when only one bound is present). */
+    private fun inRange(value: Int, min: Int?, max: Int?): Boolean =
+        (min == null || value >= min) && (max == null || value <= max)
 }

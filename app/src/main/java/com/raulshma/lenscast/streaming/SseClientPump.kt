@@ -24,26 +24,35 @@ import java.util.concurrent.atomic.AtomicInteger
 internal class SseClientPump(
     private val writerThreadName: String,
     private val maxClients: Int = DEFAULT_MAX_CLIENTS,
+    private val onClientCountChanged: (Int) -> Unit = {},
 ) {
 
     private val clients = AtomicInteger(0)
+    private val lifecycleLock = Any()
 
     /** Live sessions, so the server can push one frame to every open client. */
     private val sessions: MutableSet<SseSession> =
         Collections.newSetFromMap(ConcurrentHashMap<SseSession, Boolean>())
 
     /** Null when the client cap is reached — the transport answers 503. */
-    fun open(body: SseSession.() -> Unit): InputStream? {
+    fun open(body: SseSession.() -> Unit): InputStream? = synchronized(lifecycleLock) {
         if (clients.getAndIncrement() >= maxClients) {
             clients.decrementAndGet()
-            return null
+            return@synchronized null
         }
-        return try {
-            SseSession(body)
+        try {
+            val session = SseSession(body)
+            onClientCountChanged(clients.get())
+            session
         } catch (e: Exception) {
             clients.decrementAndGet()
+            onClientCountChanged(clients.get())
             null
         }
+    }
+
+    fun closeAll() = synchronized(lifecycleLock) {
+        sessions.toList().forEach { it.close() }
     }
 
     /**
@@ -218,7 +227,9 @@ internal class SseClientPump(
             if (closed.compareAndSet(false, true)) {
                 sessions.remove(this)
                 writer.interrupt()
-                clients.decrementAndGet()
+                synchronized(lifecycleLock) {
+                    onClientCountChanged(clients.decrementAndGet())
+                }
             }
         }
 

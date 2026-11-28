@@ -26,6 +26,7 @@ class AutomationConditionPolicyTest {
         recordingActive: Boolean = false,
         thermalNormal: Boolean = true,
         motionDetectionEnabled: Boolean = true,
+        illuminanceLux: Int? = 500,
     ) = AutomationSensorSnapshot(
         minuteOfDay = minuteOfDay,
         epochDay = 100L,
@@ -40,6 +41,7 @@ class AutomationConditionPolicyTest {
         recordingActive = recordingActive,
         thermalNormal = thermalNormal,
         motionDetectionEnabled = motionDetectionEnabled,
+        illuminanceLux = illuminanceLux,
     )
 
     private fun condition(type: String, params: Map<String, String> = emptyMap()) =
@@ -100,6 +102,20 @@ class AutomationConditionPolicyTest {
 
         // Both bounds absent: trivially met.
         assertTrue(met(condition(AutomationConditionCatalog.BATTERY_LEVEL)))
+    }
+
+    @Test
+    fun `illuminance bounds are inclusive one-sided and fail closed when unknown`() {
+        val band = condition(
+            AutomationConditionCatalog.ILLUMINANCE,
+            mapOf("min_lux" to "100", "max_lux" to "500"),
+        )
+        assertTrue(met(band, snapshot(illuminanceLux = 100)))
+        assertTrue(met(band, snapshot(illuminanceLux = 500)))
+        assertFalse(met(band, snapshot(illuminanceLux = 99)))
+        assertFalse(met(band, snapshot(illuminanceLux = 501)))
+        assertTrue(met(condition(AutomationConditionCatalog.ILLUMINANCE, mapOf("max_lux" to "500")), snapshot(illuminanceLux = 0)))
+        assertFalse(met(condition(AutomationConditionCatalog.ILLUMINANCE), snapshot(illuminanceLux = null)))
     }
 
     @Test

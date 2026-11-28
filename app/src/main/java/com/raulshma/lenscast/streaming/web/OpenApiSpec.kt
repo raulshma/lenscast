@@ -941,8 +941,8 @@ object OpenApiSpec {
             "name" to stringSchema("Free-form display label; trimmed on save"),
             "enabled" to boolSchema("Per-rule kill switch, independent of the master toggle"),
             "triggerType" to stringSchema("A trigger catalog id (time_of_day, motion_detected, sound_detected, " +
-                "tamper_detected, charging_changed, battery_level, streaming_changed, viewers_changed, app_started); " +
-                "an unknown id folds to time_of_day on save"),
+                "tamper_detected, charging_changed, battery_level, illuminance, streaming_changed, viewers_changed, " +
+                "app_started); an unknown id folds to time_of_day on save"),
             "minuteOfDay" to intSchema("The time_of_day fire minute, local wall-clock 0..1439; clamped on save"),
             "daysMask" to intSchema("The time_of_day day mask: one bit per ISO day index, bit 0 = Monday … bit 6 = Sunday; clamped to 1..127 on save"),
             "triggerParams" to mapOf(
@@ -1090,6 +1090,14 @@ object OpenApiSpec {
             "battery" to ref("BatteryStatusDto"),
             "torchOn" to boolSchema(),
             "sirenActive" to boolSchema(),
+            "illuminanceLux" to mapOf(
+                "type" to "integer",
+                "nullable" to true,
+                "minimum" to com.raulshma.lenscast.core.StreamDefaults.LIGHT_SENSOR_MIN_LUX,
+                "maximum" to com.raulshma.lenscast.core.StreamDefaults.LIGHT_SENSOR_MAX_LUX,
+                "description" to "Smoothed ambient illuminance in lux; null while unsampled",
+            ),
+            "lightSensorAvailable" to boolSchema("Whether the device exposes an ambient-light sensor"),
             "cameraBlockedByLock" to boolSchema(
                 "A live stream's camera bind is being denied because the device is locked — outputs run, no frames flow"
             ),

@@ -23,6 +23,7 @@ class AutomationTriggerCatalogTest {
                 "motion_detected",
                 "sound_detected",
                 "tamper_detected",
+                "illuminance",
                 "charging_changed",
                 "battery_level",
                 "streaming_changed",
@@ -53,6 +54,22 @@ class AutomationTriggerCatalogTest {
 
         val whenBelow = AutomationTriggerCatalog.typeFor(AutomationTriggerCatalog.BATTERY_LEVEL)!!
             .params.single { it.name == "when_below" }
+        assertEquals(ParamKind.BOOL, whenBelow.kind)
+        assertEquals("true", whenBelow.defaultValue)
+    }
+
+    @Test
+    fun `illuminance pins its threshold schema`() {
+        val type = AutomationTriggerCatalog.typeFor(AutomationTriggerCatalog.ILLUMINANCE)!!
+        assertEquals(AutomationIconVocabulary.LIGHT_SENSOR, type.icon)
+        val lux = type.params.single { it.name == "lux" }
+        assertEquals(ParamKind.INT, lux.kind)
+        assertEquals(0.0, lux.min!!, 0.0)
+        assertEquals(100_000.0, lux.max!!, 0.0)
+        assertFalse(lux.optional)
+        assertEquals("100", lux.defaultValue)
+
+        val whenBelow = type.params.single { it.name == "when_below" }
         assertEquals(ParamKind.BOOL, whenBelow.kind)
         assertEquals("true", whenBelow.defaultValue)
     }

@@ -112,6 +112,34 @@ class RuleEditorStateTest {
         assertFalse(RuleDraft.from(rule).isTimeTrigger)
     }
 
+    @Test
+    fun `the draft asks for the lux readout when the trigger or a condition reads light`() {
+        // The editor's demand gate rides this verdict: collecting the
+        // readout is what makes the source sample the sensor.
+        assertFalse(RuleDraft.new().readsIlluminance)
+
+        assertTrue(
+            RuleDraft.from(AutomationRule(triggerType = AutomationTriggerKind.ILLUMINANCE)).readsIlluminance,
+        )
+        assertTrue(
+            RuleDraft.from(
+                AutomationRule(
+                    triggerType = AutomationTriggerKind.MOTION_DETECTED,
+                    conditions = listOf(AutomationConditionSpec(type = AutomationConditionCatalog.ILLUMINANCE)),
+                ),
+            ).readsIlluminance,
+        )
+        // Light-less readers stay off the sensor, whatever their bounds.
+        assertFalse(
+            RuleDraft.from(
+                AutomationRule(
+                    triggerType = AutomationTriggerKind.BATTERY_LEVEL,
+                    conditions = listOf(AutomationConditionSpec(type = AutomationConditionCatalog.BATTERY_LEVEL)),
+                ),
+            ).readsIlluminance,
+        )
+    }
+
     // ── the draft saver's JSON codec ──
 
     @Test

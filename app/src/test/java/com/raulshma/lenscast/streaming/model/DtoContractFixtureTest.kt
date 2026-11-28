@@ -140,6 +140,8 @@ class DtoContractFixtureTest {
                 isPowerSaveMode = false,
             ),
             torchOn = false,
+            illuminanceLux = 320,
+            lightSensorAvailable = true,
             zoomRatio = 1.75,
             lensId = "0",
             lensLabel = "Wide",
@@ -225,7 +227,10 @@ class DtoContractFixtureTest {
             battery = BatteryStatusDto(level = 50, isCharging = false, isPowerSaveMode = false),
         )
         // No viewer session has reported: not a key on the wire, exactly like encodedStream.
-        assertFalse(adapter.toJson(unmeasured).contains("whepStream"))
+        val unmeasuredWire = adapter.toJson(unmeasured)
+        assertFalse(unmeasuredWire.contains("whepStream"))
+        assertFalse(unmeasuredWire.contains("illuminanceLux"))
+        assertFalse(unmeasured.lightSensorAvailable)
 
         // A viewer has reported but no frame was encoded yet (libwebrtc omits
         // the codec and the geometry until then): the rates ride, the

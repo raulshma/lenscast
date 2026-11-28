@@ -109,6 +109,7 @@ export default function SettingsPanel(props: Props) {
         <Show when={props.settings()?.streaming}>
           <OverlayCard
             streaming={() => props.settings()!.streaming}
+            status={props.status}
             onUpdate={props.updateStreamingDebounced}
           />
           <PrivacyMaskingCard

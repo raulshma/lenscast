@@ -16,6 +16,7 @@ class OverlayLayoutPolicyTest {
         showTimestamp: Boolean = false,
         showBranding: Boolean = false,
         showStatus: Boolean = false,
+        showIlluminance: Boolean = false,
         showCustomText: Boolean = false,
         brandingText: String = "LensCast",
         customText: String = "custom line",
@@ -24,6 +25,7 @@ class OverlayLayoutPolicyTest {
         showTimestamp = showTimestamp,
         showBranding = showBranding,
         showStatus = showStatus,
+        showIlluminance = showIlluminance,
         showCustomText = showCustomText,
         brandingText = brandingText,
         customText = customText,
@@ -34,16 +36,20 @@ class OverlayLayoutPolicyTest {
         showBranding: Boolean = false,
         showStatus: Boolean = false,
         clients: Int = 0,
+        showIlluminance: Boolean = false,
+        illuminanceLux: Int? = null,
         showCustomText: Boolean = false,
     ): List<String> = OverlayLayoutPolicy.buildOverlayLines(
         overlaySettings(
             showTimestamp = showTimestamp,
             showBranding = showBranding,
             showStatus = showStatus,
+            showIlluminance = showIlluminance,
             showCustomText = showCustomText,
         ),
         clients,
         nowMs = 0L,
+        illuminanceLux = illuminanceLux,
     )
 
     @Test
@@ -75,6 +81,14 @@ class OverlayLayoutPolicyTest {
     }
 
     @Test
+    fun `illuminance renders its own line and reports unknown explicitly`() {
+        assertEquals(listOf("320 lx"), buildLines(showIlluminance = true, illuminanceLux = 320))
+        assertEquals(listOf("0 lx"), buildLines(showIlluminance = true, illuminanceLux = 0))
+        assertEquals(listOf("-- lx"), buildLines(showIlluminance = true))
+        assertTrue(buildLines(showIlluminance = false, illuminanceLux = 320).isEmpty())
+    }
+
+    @Test
     fun `custom text renders only when shown, and blank text renders nothing`() {
         assertEquals(listOf("custom line"), buildLines(showCustomText = true))
         assertEquals(
@@ -88,22 +102,25 @@ class OverlayLayoutPolicyTest {
     }
 
     @Test
-    fun `all line sources stack in order timestamp branding status custom`() {
+    fun `all line sources stack in order timestamp branding status illuminance custom`() {
         val lines = OverlayLayoutPolicy.buildOverlayLines(
             overlaySettings(
                 showTimestamp = true,
                 showBranding = true,
                 showStatus = true,
+                showIlluminance = true,
                 showCustomText = true,
             ),
             clientCount = 2,
             nowMs = 0L,
+            illuminanceLux = 320,
         )
-        assertEquals(4, lines.size)
+        assertEquals(5, lines.size)
         assertTrue(lines[0].isNotBlank()) // the timestamp
         assertEquals("LensCast", lines[1])
         assertEquals("2 viewers", lines[2])
-        assertEquals("custom line", lines[3])
+        assertEquals("320 lx", lines[3])
+        assertEquals("custom line", lines[4])
     }
 
     @Test

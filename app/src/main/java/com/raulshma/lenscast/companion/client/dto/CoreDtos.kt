@@ -151,6 +151,10 @@ data class DeviceStatus(
     val watchdog: WatchdogStatus? = null,
     /** The encoded pipeline's effective target bitrate in bps. */
     val encodedVideoBitrate: Int? = null,
+    /** Smoothed ambient illuminance; absent on older firmware or while unsampled. */
+    val illuminanceLux: Int? = null,
+    /** Whether the paired device exposes an ambient-light sensor. */
+    val lightSensorAvailable: Boolean? = null,
 )
 
 /** The battery detail block of GET /api/system. */

@@ -1,5 +1,6 @@
 package com.raulshma.lenscast.companion.console
 
+import com.raulshma.lenscast.automation.AutomationIlluminance
 import com.raulshma.lenscast.automation.schedule.AutomationRule
 import com.raulshma.lenscast.automation.schedule.AutomationTriggerKind
 import com.raulshma.lenscast.companion.client.LenscastApiClient
@@ -13,6 +14,7 @@ import com.raulshma.lenscast.core.AppJson
 import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -55,7 +57,9 @@ import org.junit.Test
  *   (the armed id lands immediately), restore likewise;
  * - a read-only role's writes fire no request at all;
  * - a failed write leaves the last known document for the beat;
- * - the roster-lost device settles at the local defaults.
+ * - the roster-lost device settles at the local defaults;
+ * - the editor's lux readout polls `GET /api/status` on its own beat, only
+ *   while collected, and keeps the last reading through a failed poll.
  */
 class RemoteAutomationSourceTest {
 
@@ -74,6 +78,15 @@ class RemoteAutomationSourceTest {
 
     /** The PUT answer override; null serves the current document. */
     private val putAnswerJson = AtomicReference<String?>(null)
+
+    /** The status document the dispatcher serves the lux readout's poll; null answers 404. */
+    private val statusJson = AtomicReference<String?>(null)
+
+    /** The status lane's failure override (the HTTP code it answers); 0 serves the document. */
+    private val statusErrorCode = AtomicInteger(0)
+
+    /** Every status poll the dispatcher has served, failed ones included. */
+    private val statusPolls = AtomicInteger(0)
 
     @Before
     fun setUp() {
@@ -142,6 +155,22 @@ class RemoteAutomationSourceTest {
     }
 
     /**
+     * A `GET /api/status` document: the required core, then [tailFields]
+     * verbatim — the lux pair when the test passes it, nothing when it stands
+     * in for a device too old to publish the pair.
+     */
+    private fun statusDocJson(vararg tailFields: String): String =
+        "{" +
+            "\"streaming\":{\"isActive\":false,\"url\":\"\",\"webStreamingEnabled\":false," +
+            "\"webStreamingActive\":false,\"clientCount\":0,\"audioEnabled\":false,\"audioUrl\":\"\"," +
+            "\"rtspEnabled\":false,\"rtspStreamingActive\":false,\"rtspUrl\":\"\"}," +
+            "\"thermal\":\"NORMAL\",\"camera\":\"Ready\"," +
+            "\"battery\":{\"level\":50,\"isCharging\":false,\"isPowerSaveMode\":false}," +
+            "\"torchOn\":false,\"sirenActive\":false,\"zoomRatio\":1.0" +
+            tailFields.joinToString(separator = ",", prefix = if (tailFields.isEmpty()) "" else ",") +
+            "}"
+
+    /**
      * The device lane: GETs answer the current document; the test arm/restore
      * POSTs flip the document (as the device's own state would) before
      * answering — so the source's post-write refresh reads the armed truth.
@@ -170,6 +199,14 @@ class RemoteAutomationSourceTest {
                     docJson.set(automationDocJson())
                     ok("""{"success":true}""")
                 }
+                request.method == "GET" && path == "/api/status" -> {
+                    statusPolls.incrementAndGet()
+                    val code = statusErrorCode.get()
+                    when {
+                        code != 0 -> MockResponse().setResponseCode(code)
+                        else -> statusJson.get()?.let { ok(it) } ?: MockResponse().setResponseCode(404)
+                    }
+                }
                 else -> MockResponse().setResponseCode(404)
             }
         }
@@ -188,6 +225,9 @@ class RemoteAutomationSourceTest {
      * caused it (a poll would otherwise reconcile it within one beat).
      */
     private val parkedTimings = ConsoleTimings(automationPollMs = 60_000)
+
+    /** Only the lux readout's beat dials: the document beat is parked, the status poll lands in milliseconds. */
+    private val luxTimings = ConsoleTimings(automationPollMs = 60_000, luxPollMs = 50)
 
     private fun source(
         parent: Job,
@@ -512,6 +552,55 @@ class RemoteAutomationSourceTest {
                 assertFalse(
                     "the dropped save must surface a failure",
                     runCatching { withTimeout(5_000) { save.await() } }.isSuccess,
+                )
+            } finally {
+                parent.cancel()
+            }
+        }
+
+    @Test
+    fun `the lux readout polls the status document on its own beat and keeps the last reading through a failed poll`() =
+        runBlocking {
+            statusJson.set(statusDocJson("\"illuminanceLux\":120", "\"lightSensorAvailable\":true"))
+            val parent = Job()
+            val src = source(parent, timings = luxTimings)
+            try {
+                // Nothing collects the readout: nothing polls the device for it.
+                delay(150)
+                assertEquals(0, statusPolls.get())
+                assertEquals(AutomationIlluminance.UNKNOWN, src.illuminance.value)
+
+                // The reading and the sensor verdict ride the status document.
+                assertEquals(
+                    AutomationIlluminance(lux = 120, sensorAvailable = true),
+                    withTimeout(5_000) { src.illuminance.first { it.lux != null } },
+                )
+                // A beat, not a one-shot read.
+                withTimeout(5_000) { while (statusPolls.get() < 2) delay(20) }
+
+                // A failed poll is a read: the value the editor is showing stays.
+                statusErrorCode.set(500)
+                val pollsBefore = statusPolls.get()
+                // The second failure being SERVED proves the loop took the
+                // first one in stride and dialed again — whatever it emitted
+                // is what the flow holds now.
+                withTimeout(5_000) { while (statusPolls.get() < pollsBefore + 2) delay(20) }
+                assertEquals(AutomationIlluminance(lux = 120, sensorAvailable = true), src.illuminance.value)
+
+                // A device whose sensor has no reading yet publishes the
+                // verdict with a null lux — "waiting", not "no sensor".
+                statusErrorCode.set(0)
+                statusJson.set(statusDocJson("\"illuminanceLux\":null", "\"lightSensorAvailable\":true"))
+                assertEquals(
+                    AutomationIlluminance(lux = null, sensorAvailable = true),
+                    withTimeout(5_000) { src.illuminance.first { it.lux == null } },
+                )
+
+                // A device too old for the pair leaves the verdict unknown.
+                statusJson.set(statusDocJson())
+                assertEquals(
+                    AutomationIlluminance.UNKNOWN,
+                    withTimeout(5_000) { src.illuminance.first { it == AutomationIlluminance.UNKNOWN } },
                 )
             } finally {
                 parent.cancel()

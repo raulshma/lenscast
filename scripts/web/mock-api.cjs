@@ -52,9 +52,11 @@ const status = {
     whipActive: false,
     hlsActive: false,
   },
+  illuminanceLux: 180,
+  lightSensorAvailable: true,
 }
 
-const settings = { camera: {}, streaming: {} }
+const settings = { camera: {}, streaming: { showIlluminance: false } }
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost')

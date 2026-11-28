@@ -203,6 +203,7 @@ export default function StreamPreview(props: Props) {
   // a black screen no error can explain. Absent on older firmware → never
   // blocked, the old behavior exactly.
   const blockedByLock = () => st()?.cameraBlockedByLock === true
+  const stageLive = () => props.previewVisible() && webActive() && !blockedByLock()
 
   // Stream-stats overlay (issue #25): the indicator follows the preview's
   // own lane (MJPEG rung → the MJPEG clients' measured lane, WHEP rung →
@@ -388,7 +389,6 @@ export default function StreamPreview(props: Props) {
   // re-mounts reports its previous element for the instant before the new
   // one's ref lands; that element has no box, and the overlay treats a
   // boxless element as no picture.
-  const stageLive = () => props.previewVisible() && webActive() && !blockedByLock()
   const activeMedia = createMemo<PreviewMedia | undefined>(() => {
     if (!stageLive()) return undefined
     switch (playerMode()) {
@@ -459,13 +459,31 @@ export default function StreamPreview(props: Props) {
     minScale: 1,
     maxScale: 10,
     wheelZoomFactor: 0.15,
-    enabled: () => !props.gesturesLocked?.(),
+    enabled: () => !props.gesturesLocked?.() && stageLive(),
   })
-  // A gesture lock always starts from an unzoomed picture: the surface that
-  // took the pointer maps its own coordinates onto the frame.
+  // Zoom belongs to one picture: locks, mode changes (manual or fallback),
+  // stage loss and stream replacements all start from the full frame again.
+  // The tracked reads fire on every status refresh too (stageLive walks to
+  // the status signal), so the reset is change-gated: only an actual mode /
+  // nonce flip, a lock, or a stage that died resets — a refresh that keeps
+  // the stage live preserves the operator's zoom.
+  let lastZoomedMode: PlayerMode | undefined
+  let lastZoomedNonce: number | undefined
   createEffect(() => {
-    if (props.gesturesLocked?.() && zoom.isZoomed()) zoom.resetZoom()
+    const mode = playerMode()
+    const nonce = props.streamNonce()
+    const locked = props.gesturesLocked?.() === true
+    const live = stageLive()
+    if (locked || !live || mode !== lastZoomedMode || nonce !== lastZoomedNonce) zoom.resetZoom()
+    lastZoomedMode = mode
+    lastZoomedNonce = nonce
   })
+  // The one transform string every zoomable surface carries (image, WHEP,
+  // HLS and WebCodecs elements alike) — one spelling of "how the stage is
+  // magnified" instead of four, so a future transform change cannot leave a
+  // player behind.
+  const zoomTransform = () =>
+    `scale(${zoom.scale()}) translate(${zoom.translateX()}px, ${zoom.translateY()}px)`
 
   // ── Fullscreen preview + screen wake lock (issue #17) ──
   // The container is shared with useZoomable (same geometry-aware clamps); a
@@ -737,26 +755,38 @@ export default function StreamPreview(props: Props) {
               }, previewRetryDelayMs(count))
             }}
             style={{
-              transform: `scale(${zoom.scale()}) translate(${zoom.translateX()}px, ${zoom.translateY()}px)`,
+              transform: zoomTransform(),
             }}
           />
           }>
           <Show when={playerMode() === 'whep'} fallback={
             <Show when={playerMode() === 'h264'} fallback={
+              /* No native `controls` (issue #27): the zoom transform scales
+                 and translates the element wholesale, so a native control bar
+                 would magnify and drift with the picture — the one rung that
+                 had it drops it, making all four transports the same bare
+                 surface the wheel zooms. */
               <video
                 ref={(el) => setHlsVideo(el)}
                 class="preview-img zoomable-content"
-                controls
                 autoplay
                 muted
                 playsinline
-                style={{ width: '100%', 'background-color': '#000' }}
+                style={{
+                  width: '100%',
+                  'background-color': '#000',
+                  transform: zoomTransform(),
+                }}
               />
             }>
             <canvas
               ref={(el) => setH264Canvas(el)}
               class="preview-img zoomable-content"
-              style={{ width: '100%', 'background-color': '#000' }}
+              style={{
+                width: '100%',
+                'background-color': '#000',
+                transform: zoomTransform(),
+              }}
             />
             </Show>
           }>
@@ -775,7 +805,11 @@ export default function StreamPreview(props: Props) {
                 setPlayerMode(nextPlayerMode('whep', true, !h264Supported(), false, hlsSupported()))
               }
             }}
-            style={{ width: '100%', 'background-color': '#000' }}
+            style={{
+              width: '100%',
+              'background-color': '#000',
+              transform: zoomTransform(),
+            }}
           />
           </Show>
           </Show>

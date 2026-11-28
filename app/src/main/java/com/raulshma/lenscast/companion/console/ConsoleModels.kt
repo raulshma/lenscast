@@ -17,6 +17,7 @@ import com.raulshma.lenscast.companion.playback.PlaybackRung
  * | [capturePollMs]     | 5 000 ms | the dashboard's capture-page status readouts  |
  * | [automationPollMs]  | 30 000 ms| the automation engine's own poll cadence      |
  * | [settingsPollMs]    | 5 000 ms | the settings screens' document/status beat    |
+ * | [luxPollMs]         | 5 000 ms | the rule editor's live lux readout           |
  */
 data class ConsoleTimings(
     val recordingPollMs: Long = 5_000L,
@@ -26,6 +27,12 @@ data class ConsoleTimings(
     val automationPollMs: Long = com.raulshma.lenscast.core.StreamDefaults.AUTOMATION_POLL_SECONDS * 1_000L,
     /** The settings source's `GET /api/settings` (+ `/api/status` ranges) beat. */
     val settingsPollMs: Long = 5_000L,
+    /**
+     * The rule editor's live-lux beat (GET /api/status) — the web editor's
+     * own readout cadence, and inside the device's status-pulse TTL, so the
+     * poll itself keeps the paired device's sensor sampled.
+     */
+    val luxPollMs: Long = 5_000L,
 )
 
 /**

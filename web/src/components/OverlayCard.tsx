@@ -1,8 +1,9 @@
 import { Show } from 'solid-js'
 import SettingsCard from './SettingsCard'
-import type { OverlayPosition, StreamingSettings } from '../types'
+import type { DeviceStatus, OverlayPosition, StreamingSettings } from '../types'
 import { OVERLAY_POSITION_LABELS } from '../types'
 import { t } from '../lib/i18n'
+import { illuminanceLuxValue, illuminanceUnavailable } from '../lib/illuminance'
 
 /** Wire value → i18n key for the overlay-position options. */
 const POS_KEYS: Record<OverlayPosition, string> = {
@@ -14,11 +15,14 @@ const POS_KEYS: Record<OverlayPosition, string> = {
 
 interface Props {
   streaming: () => StreamingSettings
+  status: () => DeviceStatus | null
   onUpdate: (patch: Partial<StreamingSettings>) => void
 }
 
 export default function OverlayCard(props: Props) {
   const s = () => props.streaming()
+  const lux = () => illuminanceLuxValue(props.status())
+  const unavailable = () => illuminanceUnavailable(props.status())
 
   return (
     <SettingsCard
@@ -107,6 +111,37 @@ export default function OverlayCard(props: Props) {
               onChange={(e) => props.onUpdate({ showStatus: e.currentTarget.checked })}
             />
           </label>
+        </div>
+
+        <div class="settings-group">
+          <label class="setting-row">
+            <span class="setting-label">{t('overlay.illuminance')}</span>
+            <input
+              type="checkbox"
+              class="toggle-input"
+              checked={s().showIlluminance ?? false}
+              onChange={(e) => props.onUpdate({ showIlluminance: e.currentTarget.checked })}
+            />
+          </label>
+
+          <div class="field-row">
+            <span class="field-label">{t('overlay.illuminance')}</span>
+            <Show
+              when={lux() != null}
+              fallback={
+                <Show
+                  when={unavailable()}
+                  fallback={<span class="field-hint" role="status">{t('overlay.illuminanceWaiting')}</span>}
+                >
+                  <span class="field-hint" role="status">{t('overlay.illuminanceUnavailable')}</span>
+                </Show>
+              }
+            >
+              <span class="field-value" role="status" aria-live="polite">
+                {t('overlay.illuminanceValue', { value: lux()! })}
+              </span>
+            </Show>
+          </div>
         </div>
 
         <div class="settings-group">

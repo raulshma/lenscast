@@ -147,6 +147,7 @@ data class StreamingSettings(
     val showBranding: Boolean = false,
     val brandingText: String = "LensCast",
     val showStatus: Boolean = false,
+    val showIlluminance: Boolean = false,
     val showCustomText: Boolean = false,
     val customText: String = "",
     /** `TOP_LEFT` | `TOP_RIGHT` | `BOTTOM_LEFT` | `BOTTOM_RIGHT`. */

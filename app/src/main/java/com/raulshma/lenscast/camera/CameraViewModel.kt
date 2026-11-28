@@ -73,6 +73,7 @@ class CameraViewModel(
     connectivityMonitor: ConnectivityMonitor,
     private val recordingController: com.raulshma.lenscast.capture.RecordingController,
     private val photoCaptureManager: com.raulshma.lenscast.capture.PhotoCaptureManager,
+    private val lightSensorMonitor: LightSensorMonitor,
     ) : ViewModel(), CameraConsole {
         private val context: Context = context.applicationContext
 
@@ -388,6 +389,7 @@ class CameraViewModel(
             proToolsFrameAnalyzer.onFrame(nv21, width, height, rotation, System.currentTimeMillis())
         }
         spiritLevelMonitor.setPreviewActive(true)
+        lightSensorMonitor.setPreviewActive(true)
     }
 
     override fun stopPreview() {
@@ -397,6 +399,7 @@ class CameraViewModel(
         // preview must not flash the minutes-old analysis result.
         proToolsFrameAnalyzer.clear()
         spiritLevelMonitor.setPreviewActive(false)
+        lightSensorMonitor.setPreviewActive(false)
     }
 
     // The service owns its own preview view; switching works headless too.
@@ -706,13 +709,14 @@ class CameraViewModel(
         private val connectivityMonitor: ConnectivityMonitor,
         private val recordingController: com.raulshma.lenscast.capture.RecordingController,
         private val photoCaptureManager: com.raulshma.lenscast.capture.PhotoCaptureManager,
+        private val lightSensorMonitor: LightSensorMonitor,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
             return CameraViewModel(
                 context, cameraService, streamingManager, thermalMonitor,
                 settingsDataStore, streamingSession, streamWatchdog, connectivityMonitor,
-                recordingController, photoCaptureManager
+                recordingController, photoCaptureManager, lightSensorMonitor
             ) as T
         }
     }
@@ -737,6 +741,7 @@ class CameraViewModel(
         selfTimerRunner.dispose()
         cameraService.setProToolsFrameListener(null)
         spiritLevelMonitor.setPreviewActive(false)
+        lightSensorMonitor.setPreviewActive(false)
         super.onCleared()
     }
 }

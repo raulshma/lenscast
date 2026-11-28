@@ -2,6 +2,7 @@ package com.raulshma.lenscast.automation
 
 import com.raulshma.lenscast.automation.schedule.AutomationFireJournal
 import com.raulshma.lenscast.automation.schedule.AutomationRule
+import com.raulshma.lenscast.camera.LightSensorMonitor
 import com.raulshma.lenscast.core.StreamDefaults
 import com.raulshma.lenscast.data.SettingsDataStore
 import kotlinx.coroutines.CancellationException
@@ -14,6 +15,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onCompletion
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -96,6 +100,17 @@ interface AutomationSource {
      */
     val torchStrengthMaxLevel: StateFlow<Int?>
 
+    /**
+     * The rule editor's live ambient-light reading — what the lux trigger
+     * and condition editors show beside their thresholds. Collection IS the
+     * sensor's demand on both backends: locally the first subscriber opens
+     * the monitor's editor gate and the last one (past its grace) closes
+     * it; remotely each beat's `GET /api/status` holds the paired device's
+     * dashboard gate open. Only a rule editor that configures light should
+     * collect it.
+     */
+    val illuminance: StateFlow<AutomationIlluminance>
+
     /** Whether writes render at all (the role's config-write verdict). False hides every write affordance. */
     val canEdit: Boolean
 
@@ -130,6 +145,25 @@ interface AutomationSource {
 }
 
 /**
+ * One live ambient-light reading for the rule editor's lux readout.
+ *
+ * [lux] is the smoothed reading in lux, or null while it is unknown: the
+ * sensor has not established its first (debounced) reading yet, or nothing
+ * is sampling it. [sensorAvailable] is the device's sensor verdict — null
+ * only while the backend has no answer (or a paired device too old to
+ * publish the field), so the readout never claims "no sensor" on silence.
+ */
+data class AutomationIlluminance(
+    val lux: Int?,
+    val sensorAvailable: Boolean?,
+) {
+    companion object {
+        /** The pre-answer value: no reading, no verdict. */
+        val UNKNOWN = AutomationIlluminance(lux = null, sensorAvailable = null)
+    }
+}
+
+/**
  * The automation screen's LOCAL backend: [AutomationSource] over this
  * phone's graph singletons — the AutomationViewModel's old collaborators,
  * lifted verbatim into a source. The settings store stays the single source
@@ -148,6 +182,8 @@ class LocalAutomationSource(
     private val fireJournal: AutomationFireJournal,
     /** The bound camera's multi-level flash ceiling (the camera service's verdict flow). */
     private val torchMaxLevel: StateFlow<Int?>,
+    /** The light sensor runtime — the editor's lux readout reads it and gates it. */
+    private val lightSensorMonitor: LightSensorMonitor,
     /** The scope the journal poll and the writes run on. */
     private val scope: CoroutineScope,
 ) : AutomationSource {
@@ -155,6 +191,26 @@ class LocalAutomationSource(
     override val automationEnabled: StateFlow<Boolean> = settingsDataStore.automationEnabled
     override val armedTestRuleId: StateFlow<String?> = testController.armedRuleId
     override val torchStrengthMaxLevel: StateFlow<Int?> = torchMaxLevel
+
+    /**
+     * Straight off the light sensor monitor, and collection is the demand:
+     * the first subscriber opens the monitor's editor gate, the last one
+     * (past the grace) closes it, so an editor showing the readout is
+     * sampled and a closed one leaves the sensor to its other gates. The
+     * initial value already carries the sensor verdict — a phone without
+     * the sensor reads "no sensor" from the first frame, never a flash of
+     * "waiting".
+     */
+    override val illuminance: StateFlow<AutomationIlluminance> =
+        lightSensorMonitor.illuminanceLux
+            .map { AutomationIlluminance(lux = it, sensorAvailable = lightSensorMonitor.sensorAvailable) }
+            .onStart { lightSensorMonitor.setEditorOpen(true) }
+            .onCompletion { lightSensorMonitor.setEditorOpen(false) }
+            .stateIn(
+                scope,
+                SharingStarted.WhileSubscribed(SUBSCRIBE_GRACE_MILLIS),
+                AutomationIlluminance(lux = null, sensorAvailable = lightSensorMonitor.sensorAvailable),
+            )
 
     // The rule list is mirrored off the store's DISK truth (which stays the
     // single source of truth) beside a hydration latch: the store's shared

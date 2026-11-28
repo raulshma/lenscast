@@ -73,7 +73,7 @@ object OverlayLayoutPolicy {
 
     /**
      * Which lines the text overlay renders, top to bottom: timestamp,
-     * branding, status, custom text. Blank branding/custom text renders
+     * branding, status, illuminance, custom text. Blank branding/custom text renders
      * nothing even when switched on, and the status line appears only when
      * clients are watching. The "N viewer(s)" pluralization here is the
      * overlay-side twin — [com.raulshma.lenscast.camera.model.CameraDashboardPolicy]
@@ -84,6 +84,7 @@ object OverlayLayoutPolicy {
         settings: OverlaySettings,
         clientCount: Int,
         nowMs: Long = System.currentTimeMillis(),
+        illuminanceLux: Int? = null,
     ): List<String> {
         val lines = mutableListOf<String>()
 
@@ -105,6 +106,10 @@ object OverlayLayoutPolicy {
             val statusParts = mutableListOf<String>()
             if (clientCount > 0) statusParts.add("${clientCount} viewer${if (clientCount != 1) "s" else ""}")
             if (statusParts.isNotEmpty()) lines.add(statusParts.joinToString("  "))
+        }
+
+        if (settings.showIlluminance) {
+            lines.add(illuminanceLux?.let { "$it lx" } ?: "-- lx")
         }
 
         if (settings.showCustomText && settings.customText.isNotBlank()) {

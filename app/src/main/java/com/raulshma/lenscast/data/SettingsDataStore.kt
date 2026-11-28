@@ -156,6 +156,7 @@ private object Keys {
     val OVERLAY_SHOW_BRANDING = stringPreferencesKey("overlay_show_branding")
     val OVERLAY_BRANDING_TEXT = stringPreferencesKey("overlay_branding_text")
     val OVERLAY_SHOW_STATUS = stringPreferencesKey("overlay_show_status")
+    val OVERLAY_SHOW_ILLUMINANCE = stringPreferencesKey("overlay_show_illuminance")
     val OVERLAY_SHOW_CUSTOM_TEXT = stringPreferencesKey("overlay_show_custom_text")
     val OVERLAY_CUSTOM_TEXT = stringPreferencesKey("overlay_custom_text")
     val OVERLAY_POSITION = stringPreferencesKey("overlay_position")
@@ -1112,6 +1113,7 @@ private fun decodeOverlaySettings(prefs: Preferences): OverlaySettings {
         showBranding = readBool(prefs, Keys.OVERLAY_SHOW_BRANDING, defaultTrue = false),
         brandingText = prefs[Keys.OVERLAY_BRANDING_TEXT] ?: defaults.brandingText,
         showStatus = readBool(prefs, Keys.OVERLAY_SHOW_STATUS, defaultTrue = false),
+        showIlluminance = readBool(prefs, Keys.OVERLAY_SHOW_ILLUMINANCE, defaultTrue = false),
         showCustomText = readBool(prefs, Keys.OVERLAY_SHOW_CUSTOM_TEXT, defaultTrue = false),
         customText = prefs[Keys.OVERLAY_CUSTOM_TEXT] ?: defaults.customText,
         position = parseEnum(prefs[Keys.OVERLAY_POSITION], OverlayPosition.TOP_LEFT),
@@ -1135,6 +1137,7 @@ private fun encodeOverlaySettings(prefs: MutablePreferences, settings: OverlaySe
     writeBool(prefs, Keys.OVERLAY_SHOW_BRANDING, normalized.showBranding)
     prefs[Keys.OVERLAY_BRANDING_TEXT] = normalized.brandingText
     writeBool(prefs, Keys.OVERLAY_SHOW_STATUS, normalized.showStatus)
+    writeBool(prefs, Keys.OVERLAY_SHOW_ILLUMINANCE, normalized.showIlluminance)
     writeBool(prefs, Keys.OVERLAY_SHOW_CUSTOM_TEXT, normalized.showCustomText)
     prefs[Keys.OVERLAY_CUSTOM_TEXT] = normalized.customText
     prefs[Keys.OVERLAY_POSITION] = normalized.position.name
@@ -2038,6 +2041,8 @@ class SettingsDataStore(
     suspend fun saveMediaEncryptionEnabled(enabled: Boolean) = mediaEncryptionEnabledPref.save(enabled)
 
     suspend fun saveOverlaySettings(settings: OverlaySettings) = overlaySettingsPref.save(settings)
+
+    suspend fun overlaySettingsFromDisk(): OverlaySettings = disk(overlaySettingsPref)
 
     suspend fun saveUpdateAutoCheckEnabled(enabled: Boolean) = updateAutoCheckEnabledPref.save(enabled)
 

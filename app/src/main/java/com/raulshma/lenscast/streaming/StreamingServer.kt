@@ -117,7 +117,10 @@ class StreamingServer(
         com.raulshma.lenscast.streaming.hls.HlsManager,
     )
     private val audioManager = audioStreamingManager
-    private val sseStatusStream = SseStatusStream(webApi.status)
+    private val sseStatusStream = SseStatusStream(
+        webApi.status,
+        onClientCountChanged = webApi.onDashboardClientsChanged,
+    )
     private val sseDetectionEventStream = SseDetectionEventStream(webApi.detectionEvents)
 
     /**
@@ -641,6 +644,7 @@ class StreamingServer(
         if (runState == RunState.NeverTried) return
         runState = RunState.FailedStart
         runCatching { stop() }
+            .also { sseStatusStream.close() }
             .onSuccess {
                 // Clear only after the socket release succeeded: a throwing
                 // stop must stay retryable, or the port leaks until the

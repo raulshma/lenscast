@@ -33,6 +33,7 @@ object StreamOverlayRenderer {
         bitmap: Bitmap,
         settings: OverlaySettings,
         clientCount: Int = 0,
+        illuminanceLux: Int? = null,
     ): Bitmap {
         if (!settings.enabled && !settings.maskingEnabled) return bitmap
 
@@ -46,7 +47,7 @@ object StreamOverlayRenderer {
             }
 
             if (settings.enabled) {
-                drawTextOverlay(canvas, settings, clientCount, System.currentTimeMillis())
+                drawTextOverlay(canvas, settings, clientCount, System.currentTimeMillis(), illuminanceLux)
             }
 
             mutableBitmap
@@ -174,9 +175,10 @@ object StreamOverlayRenderer {
         targetWidth: Int,
         clientCount: Int = 0,
         nowMs: Long = System.currentTimeMillis(),
+        illuminanceLux: Int? = null,
     ): Bitmap? {
         if (!settings.enabled) return null
-        val lines = OverlayLayoutPolicy.buildOverlayLines(settings, clientCount, nowMs)
+        val lines = OverlayLayoutPolicy.buildOverlayLines(settings, clientCount, nowMs, illuminanceLux)
         if (lines.isEmpty()) return null
 
         val scale = targetWidth / OverlayLayoutPolicy.REFERENCE_WIDTH
@@ -225,8 +227,9 @@ object StreamOverlayRenderer {
         settings: OverlaySettings,
         clientCount: Int,
         nowMs: Long,
+        illuminanceLux: Int?,
     ) {
-        val box = renderTextOverlayBitmap(settings, canvas.width, clientCount, nowMs) ?: return
+        val box = renderTextOverlayBitmap(settings, canvas.width, clientCount, nowMs, illuminanceLux) ?: return
         val position = OverlayLayoutPolicy.computeOverlayPosition(
             settings.position,
             canvas.width,

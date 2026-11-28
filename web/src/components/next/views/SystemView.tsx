@@ -188,6 +188,7 @@ export default function SystemView(props: { state: NextState }) {
               <Rack id={sectionId('overlays')} title={t('system.section.overlays')}>
                 <OverlayPanel
                   streaming={() => state.settings()!.streaming}
+                  status={state.status}
                   onUpdate={state.updateStreamingDebounced}
                 />
                 <PrivacyMaskingPanel

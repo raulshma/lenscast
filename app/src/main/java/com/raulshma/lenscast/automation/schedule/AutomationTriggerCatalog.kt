@@ -1,5 +1,7 @@
 package com.raulshma.lenscast.automation.schedule
 
+import com.raulshma.lenscast.core.StreamDefaults
+
 /**
  * One runtime cue an automation rule can fire on — the event vocabulary the
  * wiring layer emits and the schedule policy matches against trigger types.
@@ -31,6 +33,9 @@ sealed interface AutomationEvent {
 
     /** Battery level moved between distinct integer percents. */
     data class BatteryLevelChanged(val previous: Int?, val current: Int) : AutomationEvent
+
+    /** Ambient illuminance moved between distinct integer lux readings. */
+    data class IlluminanceChanged(val previous: Int?, val current: Int) : AutomationEvent
 
     /** Streaming started ([streaming] = true) or stopped. */
     data class StreamingChanged(val streaming: Boolean) : AutomationEvent
@@ -82,6 +87,7 @@ object AutomationTriggerCatalog {
     const val TAMPER_DETECTED = "tamper_detected"
     const val CHARGING_CHANGED = "charging_changed"
     const val BATTERY_LEVEL = "battery_level"
+    const val ILLUMINANCE = "illuminance"
     const val STREAMING_CHANGED = "streaming_changed"
     const val VIEWERS_CHANGED = "viewers_changed"
     const val APP_STARTED = "app_started"
@@ -121,6 +127,29 @@ object AutomationTriggerCatalog {
             params = emptyList(),
             group = GROUP_DEVICE_EVENTS,
             icon = AutomationIconVocabulary.SHIELD,
+        ),
+        AutomationTriggerType(
+            id = ILLUMINANCE,
+            params = listOf(
+                AutomationParamSpec(
+                    name = "lux",
+                    kind = ParamKind.INT,
+                    min = StreamDefaults.LIGHT_SENSOR_MIN_LUX.toDouble(),
+                    max = StreamDefaults.LIGHT_SENSOR_MAX_LUX.toDouble(),
+                    optional = false,
+                    defaultValue = StreamDefaults.LIGHT_SENSOR_TRIGGER_DEFAULT_LUX.toString(),
+                ),
+                AutomationParamSpec(
+                    name = "when_below",
+                    kind = ParamKind.BOOL,
+                    min = null,
+                    max = null,
+                    optional = false,
+                    defaultValue = "true",
+                ),
+            ),
+            group = GROUP_DEVICE_EVENTS,
+            icon = AutomationIconVocabulary.LIGHT_SENSOR,
         ),
         AutomationTriggerType(
             id = CHARGING_CHANGED,

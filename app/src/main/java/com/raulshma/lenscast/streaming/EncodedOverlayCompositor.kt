@@ -25,6 +25,7 @@ import com.raulshma.lenscast.core.YuvConverter
  */
 internal class EncodedOverlayCompositor(
     private val rasterizer: Rasterizer = AndroidRasterizer,
+    private val illuminanceProvider: () -> Int? = { null },
 ) {
 
     /**
@@ -41,6 +42,7 @@ internal class EncodedOverlayCompositor(
             targetWidth: Int,
             nowMs: Long,
             clientCount: Int,
+            illuminanceLux: Int? = null,
         ): YuvaStrip? = render(settings, targetWidth, nowMs)
     }
 
@@ -62,12 +64,14 @@ internal class EncodedOverlayCompositor(
             targetWidth: Int,
             nowMs: Long,
             clientCount: Int,
+            illuminanceLux: Int?,
         ): YuvaStrip? {
             val box = StreamOverlayRenderer.renderTextOverlayBitmap(
                 settings,
                 targetWidth,
                 clientCount,
                 nowMs,
+                illuminanceLux,
             ) ?: return null
             val width = box.width
             val height = box.height
@@ -130,12 +134,13 @@ internal class EncodedOverlayCompositor(
         // The rendered-content dirty check: the line list is what actually
         // shows, so a timestamp re-render happens exactly on its second
         // boundary (the default format) and nothing else re-rasterizes.
-        val lines = OverlayLayoutPolicy.buildOverlayLines(current, clientCount, nowMs)
+        val illuminanceLux = if (current.showIlluminance) illuminanceProvider() else null
+        val lines = OverlayLayoutPolicy.buildOverlayLines(current, clientCount, nowMs, illuminanceLux)
         val slot = slotFor(frameWidth, frameHeight)
         if (lines != slot.lines || current !== slot.settings) {
             slot.lines = lines
             slot.settings = current
-            slot.strip = rasterizer.renderWithClients(current, frameWidth, nowMs, clientCount)
+            slot.strip = rasterizer.renderWithClients(current, frameWidth, nowMs, clientCount, illuminanceLux)
             slot.position = slot.strip?.let {
                 OverlayLayoutPolicy.computeOverlayPosition(
                     current.position,

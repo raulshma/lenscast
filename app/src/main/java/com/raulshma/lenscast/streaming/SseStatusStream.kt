@@ -18,9 +18,15 @@ import java.io.InputStream
 class SseStatusStream(
     private val status: StatusWebHandler,
     private val intervalMs: Long = DEFAULT_INTERVAL_MS,
+    private val onClientCountChanged: (Int) -> Unit = {},
 ) {
 
-    private val pump = SseClientPump(writerThreadName = "SseStatusWriter")
+    private val pump = SseClientPump(
+        writerThreadName = "SseStatusWriter",
+        onClientCountChanged = onClientCountChanged,
+    )
+
+    fun close() = pump.closeAll()
 
     /**
      * Pushes a one-shot `transport` event telling every open dashboard the

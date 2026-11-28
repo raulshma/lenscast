@@ -579,6 +579,7 @@
     <string name="automation_param_motion">移动侦测</string>
     <string name="automation_param_sound">声音侦测</string>
     <string name="automation_param_enabled">已启用</string>
+    <string name="automation_param_type_value">输入数值</string>
     <string name="automation_summary_torch_on">手电筒开</string>
     <string name="automation_summary_torch_off">手电筒关</string>
     <string name="automation_summary_torch_strength">手电筒亮度 %1$s</string>
@@ -612,6 +613,7 @@
     <string name="automation_trigger_motion">检测到移动</string>
     <string name="automation_trigger_sound">检测到声音</string>
     <string name="automation_trigger_tamper">篡改(断电)</string>
+    <string name="automation_trigger_illuminance">环境光照越界</string>
     <string name="automation_trigger_charging">接入 / 断开充电</string>
     <string name="automation_trigger_battery">电量阈值越过</string>
     <string name="automation_trigger_streaming">直播开始 / 停止</string>
@@ -620,6 +622,8 @@
     <string name="automation_summary_trigger_motion">当检测到移动时</string>
     <string name="automation_summary_trigger_sound">当检测到声音时</string>
     <string name="automation_summary_trigger_tamper">发生篡改(断电)时</string>
+    <string name="automation_summary_trigger_illuminance_below">当光照降至 %1$s 勒克斯时</string>
+    <string name="automation_summary_trigger_illuminance_above">当光照升至 %1$s 勒克斯以上时</string>
     <string name="automation_summary_trigger_charging_on">当接入充电时</string>
     <string name="automation_summary_trigger_charging_off">当断开充电时</string>
     <string name="automation_summary_trigger_battery_below">当电量降至 %1$s%% 时</string>
@@ -633,6 +637,7 @@
     <!-- 触发器参数 -->
     <string name="automation_param_battery_threshold">电量(%)</string>
     <string name="automation_param_when_below">在下降时</string>
+    <string name="automation_param_lux_threshold">光照强度(勒克斯)</string>
     <string name="automation_param_charging_plugged">充电中</string>
     <string name="automation_param_streaming_active">直播中</string>
     <string name="automation_param_viewers_connected">有观众在线</string>
@@ -641,6 +646,7 @@
     <string name="automation_condition_time_window">时间段</string>
     <string name="automation_condition_charging">充电状态</string>
     <string name="automation_condition_battery">电量水平</string>
+    <string name="automation_condition_illuminance">环境光照</string>
     <string name="automation_condition_power_save">省电模式</string>
     <string name="automation_condition_wifi">已连接 Wi-Fi</string>
     <string name="automation_condition_streaming">直播中</string>
@@ -654,6 +660,8 @@
     <string name="automation_param_window_days">星期</string>
     <string name="automation_param_battery_min">最小值(%)</string>
     <string name="automation_param_battery_max">最大值(%)</string>
+    <string name="automation_param_lux_min">最小值(勒克斯)</string>
+    <string name="automation_param_lux_max">最大值(勒克斯)</string>
     <string name="automation_param_power_save_on">省电模式开启</string>
     <string name="automation_param_wifi_connected">已连接</string>
     <string name="automation_param_viewers_min">最少观众</string>
@@ -668,6 +676,10 @@
     <string name="automation_summary_condition_battery_min">电量 ≥ %1$s%%</string>
     <string name="automation_summary_condition_battery_max">电量 ≤ %1$s%%</string>
     <string name="automation_summary_condition_battery_any">电量:任意水平</string>
+    <string name="automation_summary_condition_illuminance_between">环境光照 %1$s–%2$s 勒克斯</string>
+    <string name="automation_summary_condition_illuminance_min">环境光照 ≥ %1$s 勒克斯</string>
+    <string name="automation_summary_condition_illuminance_max">环境光照 ≤ %1$s 勒克斯</string>
+    <string name="automation_summary_condition_illuminance_any">环境光照:任意水平</string>
     <string name="automation_summary_condition_power_save_on">省电模式开启期间</string>
     <string name="automation_summary_condition_power_save_off">省电模式关闭期间</string>
     <string name="automation_summary_condition_wifi_on">Wi-Fi 已连接期间</string>
@@ -704,6 +716,11 @@
     <string name="automation_missed_window">窗口期内</string>
     <string name="automation_editor_missed_window">补跑窗口</string>
     <string name="automation_editor_window_wrap_hint">跨越午夜的时间窗口(开始 &gt; 结束)会延续到第二天</string>
+
+    <!-- 自动化编辑器:勒克斯触发器或条件旁的实时环境光照读数 -->
+    <string name="automation_illuminance_now">当前环境光照:%1$s 勒克斯</string>
+    <string name="automation_illuminance_unavailable">没有可用的环境光传感器。</string>
+    <string name="automation_illuminance_waiting">正在等待光照读数…</string>
 
     <!-- 自动化屏幕:引擎卡片、规则卡片、空状态 -->
     <string name="automation_master_section_title">引擎</string>
@@ -766,6 +783,7 @@
     <string name="automation_trigger_desc_motion">检测器发现移动时触发</string>
     <string name="automation_trigger_desc_sound">检测器听到声音时触发</string>
     <string name="automation_trigger_desc_tamper">防拆检测触发时触发(断电)</string>
+    <string name="automation_trigger_desc_illuminance">环境光越过勒克斯阈值时触发</string>
     <string name="automation_trigger_desc_charging">充电器插入或拔出时触发</string>
     <string name="automation_trigger_desc_battery">电量越过设定值时触发</string>
     <string name="automation_trigger_desc_streaming">推流开始或停止时触发</string>
@@ -788,6 +806,7 @@
 
     <!-- 自动化:选择器描述,条件 -->
     <string name="automation_condition_desc_time_window">仅限每日时间段内,可选仅限所选日期</string>
+    <string name="automation_condition_desc_illuminance">仅当环境光处于勒克斯范围内时</string>
     <string name="automation_condition_desc_charging">仅在充电器已插入(或未插入)时</string>
     <string name="automation_condition_desc_battery">仅当电量高于和/或低于某值时</string>
     <string name="automation_condition_desc_power_save">仅在省电模式开启(或关闭)时</string>

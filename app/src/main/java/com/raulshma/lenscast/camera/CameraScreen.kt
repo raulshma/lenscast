@@ -301,7 +301,7 @@ fun CameraScreen(
                 context, app.cameraService, app.streamingManager,
                 app.thermalMonitor, app.settingsDataStore, app.streamingSession,
                 app.streamWatchdog, app.connectivityMonitor, app.recordingController,
-                app.photoCaptureManager
+                app.photoCaptureManager, app.lightSensorMonitor
             )
         )
         console = local

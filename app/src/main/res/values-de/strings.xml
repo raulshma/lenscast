@@ -584,6 +584,7 @@
     <string name="automation_param_motion">Bewegungserkennung</string>
     <string name="automation_param_sound">Tonererkennung</string>
     <string name="automation_param_enabled">Aktiviert</string>
+    <string name="automation_param_type_value">Wert eingeben</string>
     <string name="automation_summary_torch_on">Taschenlampe an</string>
     <string name="automation_summary_torch_off">Taschenlampe aus</string>
     <string name="automation_summary_torch_strength">Taschenlampenstärke %1$s</string>
@@ -617,6 +618,7 @@
     <string name="automation_trigger_motion">Bewegung erkannt</string>
     <string name="automation_trigger_sound">Ton erkannt</string>
     <string name="automation_trigger_tamper">Manipulation (Stromtrennung)</string>
+    <string name="automation_trigger_illuminance">Umgebungslicht-Schwelle</string>
     <string name="automation_trigger_charging">Ladegerät angeschlossen / getrennt</string>
     <string name="automation_trigger_battery">Akkustand-Schwelle</string>
     <string name="automation_trigger_streaming">Stream-Start / -Stopp</string>
@@ -625,6 +627,8 @@
     <string name="automation_summary_trigger_motion">Wenn Bewegung erkannt wird</string>
     <string name="automation_summary_trigger_sound">Wenn Ton erkannt wird</string>
     <string name="automation_summary_trigger_tamper">Bei Manipulation (Stromtrennung)</string>
+    <string name="automation_summary_trigger_illuminance_below">Wenn das Licht auf %1$s Lux sinkt</string>
+    <string name="automation_summary_trigger_illuminance_above">Wenn das Licht über %1$s Lux steigt</string>
     <string name="automation_summary_trigger_charging_on">Wenn das Ladegerät angeschlossen wird</string>
     <string name="automation_summary_trigger_charging_off">Wenn das Ladegerät getrennt wird</string>
     <string name="automation_summary_trigger_battery_below">Wenn der Akku auf %1$s%% fällt</string>
@@ -638,6 +642,7 @@
     <!-- Auslöser-Parameter -->
     <string name="automation_param_battery_threshold">Akkustand (%)</string>
     <string name="automation_param_when_below">Beim Fallen</string>
+    <string name="automation_param_lux_threshold">Lichtstärke (Lux)</string>
     <string name="automation_param_charging_plugged">Lädt</string>
     <string name="automation_param_streaming_active">Streaming</string>
     <string name="automation_param_viewers_connected">Zuschauer anwesend</string>
@@ -646,6 +651,7 @@
     <string name="automation_condition_time_window">Zeitfenster</string>
     <string name="automation_condition_charging">Ladestatus</string>
     <string name="automation_condition_battery">Akkustand</string>
+    <string name="automation_condition_illuminance">Umgebungslicht</string>
     <string name="automation_condition_power_save">Energiesparmodus</string>
     <string name="automation_condition_wifi">WLAN verbunden</string>
     <string name="automation_condition_streaming">Streaming aktiv</string>
@@ -659,6 +665,8 @@
     <string name="automation_param_window_days">Tage</string>
     <string name="automation_param_battery_min">Minimum (%)</string>
     <string name="automation_param_battery_max">Maximum (%)</string>
+    <string name="automation_param_lux_min">Minimum (Lux)</string>
+    <string name="automation_param_lux_max">Maximum (Lux)</string>
     <string name="automation_param_power_save_on">Energiesparmodus an</string>
     <string name="automation_param_wifi_connected">Verbunden</string>
     <string name="automation_param_viewers_min">Minimum Zuschauer</string>
@@ -673,6 +681,10 @@
     <string name="automation_summary_condition_battery_min">Akku ≥ %1$s%%</string>
     <string name="automation_summary_condition_battery_max">Akku ≤ %1$s%%</string>
     <string name="automation_summary_condition_battery_any">Akku: beliebiger Stand</string>
+    <string name="automation_summary_condition_illuminance_between">Umgebungslicht %1$s–%2$s Lux</string>
+    <string name="automation_summary_condition_illuminance_min">Umgebungslicht ≥ %1$s Lux</string>
+    <string name="automation_summary_condition_illuminance_max">Umgebungslicht ≤ %1$s Lux</string>
+    <string name="automation_summary_condition_illuminance_any">Umgebungslicht: beliebiger Wert</string>
     <string name="automation_summary_condition_power_save_on">Bei eingeschaltetem Energiesparmodus</string>
     <string name="automation_summary_condition_power_save_off">Bei ausgeschaltetem Energiesparmodus</string>
     <string name="automation_summary_condition_wifi_on">Bei verbundenem WLAN</string>
@@ -709,6 +721,11 @@
     <string name="automation_missed_window">Innerhalb eines Zeitfensters</string>
     <string name="automation_editor_missed_window">Nachholfenster</string>
     <string name="automation_editor_window_wrap_hint">Ein Zeitfenster über Mitternacht hinaus (von &gt; bis) reicht in den nächsten Tag</string>
+
+    <!-- Automatisierungs-Editor: die Live-Anzeige des Umgebungslichts neben einer Lux-Bedingung -->
+    <string name="automation_illuminance_now">Aktuelles Umgebungslicht: %1$s Lux</string>
+    <string name="automation_illuminance_unavailable">Es ist kein Umgebungslichtsensor verfügbar.</string>
+    <string name="automation_illuminance_waiting">Warten auf eine Lichtmessung…</string>
 
     <!-- Automatisierung: Engine-Karte, Regelkarten, Leerer Zustand -->
     <string name="automation_master_section_title">Engine</string>
@@ -771,6 +788,7 @@
     <string name="automation_trigger_desc_motion">Löst aus, wenn der Bewegungsmelder eine Bewegung erkennt</string>
     <string name="automation_trigger_desc_sound">Löst aus, wenn die Geräuscherkennung ein Geräusch wahrnimmt</string>
     <string name="automation_trigger_desc_tamper">Löst aus, wenn die Manipulationserkennung anspringt (Stromausfall)</string>
+    <string name="automation_trigger_desc_illuminance">Löst aus, wenn das Umgebungslicht einen Lux-Schwellenwert über- oder unterschreitet</string>
     <string name="automation_trigger_desc_charging">Löst aus, wenn das Ladegerät an- oder abgesteckt wird</string>
     <string name="automation_trigger_desc_battery">Löst aus, wenn der Akku einen gewählten Wert über- oder unterschreitet</string>
     <string name="automation_trigger_desc_streaming">Löst aus, wenn das Streaming startet oder stoppt</string>
@@ -793,6 +811,7 @@
 
     <!-- Automatisierung: Auswahldialog-Beschreibungen, Bedingungen -->
     <string name="automation_condition_desc_time_window">Nur innerhalb eines täglichen Zeitfensters, optional an gewählten Tagen</string>
+    <string name="automation_condition_desc_illuminance">Nur solange das Umgebungslicht in einem Lux-Bereich liegt</string>
     <string name="automation_condition_desc_charging">Nur bei angeschlossenem (bzw. abgestecktem) Ladegerät</string>
     <string name="automation_condition_desc_battery">Nur wenn der Akku über und/oder unter einem Wert liegt</string>
     <string name="automation_condition_desc_power_save">Nur bei ein- (bzw. aus-)geschaltetem Energiesparmodus</string>

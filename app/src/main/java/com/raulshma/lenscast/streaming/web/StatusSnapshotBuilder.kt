@@ -209,6 +209,8 @@ object StatusSnapshotBuilder {
         whepStream: WhepStreamInputs? = null,
         sirenActive: Boolean = false,
         cameraBlockedByLock: Boolean = false,
+        illuminanceLux: Int? = null,
+        lightSensorAvailable: Boolean = false,
     ): StatusResponseDto {
         val adaptiveBitrateDto = if (adaptive.enabled) {
             AdaptiveBitrateStatusDto(
@@ -293,6 +295,8 @@ object StatusSnapshotBuilder {
             torchOn = camera?.torchOn ?: false,
             sirenActive = sirenActive,
             cameraBlockedByLock = cameraBlockedByLock,
+            illuminanceLux = illuminanceLux,
+            lightSensorAvailable = lightSensorAvailable,
             zoomRatio = camera?.zoomRatio ?: 1.0,
             lensId = camera?.lensId,
             lensLabel = camera?.lensLabel,

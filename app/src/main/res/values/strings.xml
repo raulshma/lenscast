@@ -606,6 +606,7 @@
     <string name="automation_param_motion">Motion detection</string>
     <string name="automation_param_sound">Sound detection</string>
     <string name="automation_param_enabled">Enabled</string>
+    <string name="automation_param_type_value">Type a value</string>
     <string name="automation_summary_torch_on">Torch on</string>
     <string name="automation_summary_torch_off">Torch off</string>
     <string name="automation_summary_torch_strength">Torch strength %1$s</string>
@@ -639,6 +640,7 @@
     <string name="automation_trigger_motion">Motion detected</string>
     <string name="automation_trigger_sound">Sound detected</string>
     <string name="automation_trigger_tamper">Tamper (power cut)</string>
+    <string name="automation_trigger_illuminance">Ambient light crossing</string>
     <string name="automation_trigger_charging">Charger connect / disconnect</string>
     <string name="automation_trigger_battery">Battery level crossing</string>
     <string name="automation_trigger_streaming">Streaming start / stop</string>
@@ -647,6 +649,8 @@
     <string name="automation_summary_trigger_motion">When motion is detected</string>
     <string name="automation_summary_trigger_sound">When sound is detected</string>
     <string name="automation_summary_trigger_tamper">On tamper (power cut)</string>
+    <string name="automation_summary_trigger_illuminance_below">When light drops to %1$s lux</string>
+    <string name="automation_summary_trigger_illuminance_above">When light rises above %1$s lux</string>
     <string name="automation_summary_trigger_charging_on">When the charger connects</string>
     <string name="automation_summary_trigger_charging_off">When the charger disconnects</string>
     <string name="automation_summary_trigger_battery_below">When battery drops to %1$s%%</string>
@@ -660,6 +664,7 @@
     <!-- Trigger params -->
     <string name="automation_param_battery_threshold">Battery level (%)</string>
     <string name="automation_param_when_below">When dropping</string>
+    <string name="automation_param_lux_threshold">Light level (lux)</string>
     <string name="automation_param_charging_plugged">Charging</string>
     <string name="automation_param_streaming_active">Streaming</string>
     <string name="automation_param_viewers_connected">Viewer present</string>
@@ -668,6 +673,7 @@
     <string name="automation_condition_time_window">Time window</string>
     <string name="automation_condition_charging">Charging state</string>
     <string name="automation_condition_battery">Battery level</string>
+    <string name="automation_condition_illuminance">Ambient light</string>
     <string name="automation_condition_power_save">Power save</string>
     <string name="automation_condition_wifi">Wi-Fi connected</string>
     <string name="automation_condition_streaming">Streaming active</string>
@@ -681,6 +687,8 @@
     <string name="automation_param_window_days">Days</string>
     <string name="automation_param_battery_min">Minimum (%)</string>
     <string name="automation_param_battery_max">Maximum (%)</string>
+    <string name="automation_param_lux_min">Minimum (lux)</string>
+    <string name="automation_param_lux_max">Maximum (lux)</string>
     <string name="automation_param_power_save_on">Power save on</string>
     <string name="automation_param_wifi_connected">Connected</string>
     <string name="automation_param_viewers_min">Minimum viewers</string>
@@ -695,6 +703,10 @@
     <string name="automation_summary_condition_battery_min">Battery ≥ %1$s%%</string>
     <string name="automation_summary_condition_battery_max">Battery ≤ %1$s%%</string>
     <string name="automation_summary_condition_battery_any">Battery: any level</string>
+    <string name="automation_summary_condition_illuminance_between">Ambient light %1$s–%2$s lux</string>
+    <string name="automation_summary_condition_illuminance_min">Ambient light ≥ %1$s lux</string>
+    <string name="automation_summary_condition_illuminance_max">Ambient light ≤ %1$s lux</string>
+    <string name="automation_summary_condition_illuminance_any">Ambient light: any level</string>
     <string name="automation_summary_condition_power_save_on">While power save is on</string>
     <string name="automation_summary_condition_power_save_off">While power save is off</string>
     <string name="automation_summary_condition_wifi_on">While Wi-Fi is connected</string>
@@ -731,6 +743,11 @@
     <string name="automation_missed_window">Within a window</string>
     <string name="automation_editor_missed_window">Catch-up window</string>
     <string name="automation_editor_window_wrap_hint">A window that crosses midnight (from &gt; until) wraps to the next day</string>
+
+    <!-- Automation editor: the live ambient-light readout beside a lux trigger or condition -->
+    <string name="automation_illuminance_now">Ambient light now: %1$s lux</string>
+    <string name="automation_illuminance_unavailable">No ambient light sensor is available.</string>
+    <string name="automation_illuminance_waiting">Waiting for a light reading…</string>
 
     <!-- Automation screen: engine card, rule cards, empty state -->
     <string name="automation_master_section_title">Engine</string>
@@ -793,6 +810,7 @@
     <string name="automation_trigger_desc_motion">Fires when the motion detector sees movement</string>
     <string name="automation_trigger_desc_sound">Fires when the sound detector hears a noise</string>
     <string name="automation_trigger_desc_tamper">Fires when tamper detection trips (power cut)</string>
+    <string name="automation_trigger_desc_illuminance">Fires when the ambient light crosses a lux threshold</string>
     <string name="automation_trigger_desc_charging">Fires when the charger is plugged in or unplugged</string>
     <string name="automation_trigger_desc_battery">Fires when the battery crosses a chosen level</string>
     <string name="automation_trigger_desc_streaming">Fires when streaming starts or stops</string>
@@ -815,6 +833,7 @@
 
     <!-- Automation picker descriptions: conditions -->
     <string name="automation_condition_desc_time_window">Only within a daily time span, optionally on chosen days</string>
+    <string name="automation_condition_desc_illuminance">Only while the ambient light is within a lux range</string>
     <string name="automation_condition_desc_charging">Only while the charger is plugged in (or unplugged)</string>
     <string name="automation_condition_desc_battery">Only while the battery is above and/or below a level</string>
     <string name="automation_condition_desc_power_save">Only while battery saver is on (or off)</string>

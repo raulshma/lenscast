@@ -65,6 +65,7 @@ data class OverlaySettings(
     val showBranding: Boolean = false,
     val brandingText: String = "LensCast",
     val showStatus: Boolean = false,
+    val showIlluminance: Boolean = false,
     val customText: String = "",
     val showCustomText: Boolean = false,
     val position: OverlayPosition = OverlayPosition.TOP_LEFT,

@@ -70,6 +70,7 @@ class AutomationSchedulePolicyTest {
         recordingActive: Boolean = false,
         thermalNormal: Boolean = true,
         motionDetectionEnabled: Boolean = true,
+        illuminanceLux: Int? = 500,
     ) = AutomationSensorSnapshot(
         minuteOfDay = minuteOfDay,
         epochDay = epochDay,
@@ -84,6 +85,7 @@ class AutomationSchedulePolicyTest {
         recordingActive = recordingActive,
         thermalNormal = thermalNormal,
         motionDetectionEnabled = motionDetectionEnabled,
+        illuminanceLux = illuminanceLux,
     )
 
     private fun due(
@@ -487,6 +489,105 @@ class AutomationSchedulePolicyTest {
         )
         assertTrue(
             eventFired(AutomationEvent.ViewersChanged(connected = false), rules = onJoin).isEmpty(),
+        )
+    }
+
+    @Test
+    fun `illuminance rule fires only on its threshold crossing`() {
+        fun illuminanceRule(whenBelow: Boolean) = rule(
+            triggerType = AutomationTriggerKind.ILLUMINANCE,
+            triggerParams = mapOf("lux" to "100", "when_below" to whenBelow.toString()),
+        )
+
+        assertEquals(
+            1,
+            eventFired(
+                AutomationEvent.IlluminanceChanged(previous = 101, current = 100),
+                rules = listOf(illuminanceRule(whenBelow = true)),
+            ).size,
+        )
+        assertTrue(
+            eventFired(
+                AutomationEvent.IlluminanceChanged(previous = 100, current = 100),
+                rules = listOf(illuminanceRule(whenBelow = true)),
+            ).isEmpty(),
+        )
+        assertEquals(
+            1,
+            eventFired(
+                AutomationEvent.IlluminanceChanged(previous = 100, current = 101),
+                rules = listOf(illuminanceRule(whenBelow = false)),
+            ).size,
+        )
+        assertTrue(
+            eventFired(
+                AutomationEvent.IlluminanceChanged(previous = 101, current = 100),
+                rules = listOf(illuminanceRule(whenBelow = false)),
+            ).isEmpty(),
+        )
+    }
+
+    @Test
+    fun `illuminance rule fires on the first sample when the app woke up past the threshold`() {
+        fun illuminanceRule(whenBelow: Boolean) = rule(
+            triggerType = AutomationTriggerKind.ILLUMINANCE,
+            triggerParams = mapOf("lux" to "100", "when_below" to whenBelow.toString()),
+        )
+
+        // Boot into darkness: the first published reading is already at the
+        // "drops below" side — that IS the dusk edge the rule exists for.
+        assertEquals(
+            1,
+            eventFired(
+                AutomationEvent.IlluminanceChanged(previous = null, current = 100),
+                rules = listOf(illuminanceRule(whenBelow = true)),
+            ).size,
+        )
+        // Boot into light with a "drops below" rule: no fire until a real
+        // descent crosses the threshold.
+        assertTrue(
+            eventFired(
+                AutomationEvent.IlluminanceChanged(previous = null, current = 101),
+                rules = listOf(illuminanceRule(whenBelow = true)),
+            ).isEmpty(),
+        )
+        // Mirror side: boot already above a "rises above" threshold fires.
+        assertEquals(
+            1,
+            eventFired(
+                AutomationEvent.IlluminanceChanged(previous = null, current = 101),
+                rules = listOf(illuminanceRule(whenBelow = false)),
+            ).size,
+        )
+        assertTrue(
+            eventFired(
+                AutomationEvent.IlluminanceChanged(previous = null, current = 100),
+                rules = listOf(illuminanceRule(whenBelow = false)),
+            ).isEmpty(),
+        )
+    }
+
+    @Test
+    fun `the light sensor demand needs the engine on and an enabled rule that reads light`() {
+        val triggerRule = rule(triggerType = AutomationTriggerKind.ILLUMINANCE)
+        val conditionRule = rule(
+            conditions = listOf(
+                AutomationConditionSpec(AutomationConditionCatalog.ILLUMINANCE, mapOf("min_lux" to "10")),
+            ),
+        )
+        val timeRule = rule()
+
+        assertTrue(AutomationSchedulePolicy.readsIlluminance(triggerRule))
+        assertTrue(AutomationSchedulePolicy.readsIlluminance(conditionRule))
+        assertFalse(AutomationSchedulePolicy.readsIlluminance(timeRule))
+
+        assertTrue(AutomationSchedulePolicy.lightSensorDemand(true, listOf(triggerRule)))
+        assertTrue(AutomationSchedulePolicy.lightSensorDemand(true, listOf(timeRule, conditionRule)))
+        // A disabled engine keeps the sensor off whatever its rules read...
+        assertFalse(AutomationSchedulePolicy.lightSensorDemand(false, listOf(triggerRule)))
+        // ...and so does a rule that is disabled.
+        assertFalse(
+            AutomationSchedulePolicy.lightSensorDemand(true, listOf(triggerRule.copy(enabled = false), timeRule)),
         )
     }
 

@@ -24,6 +24,27 @@ const CATALOGS: Record<string, Partial<Record<string, string>>> = { de, es, fr, 
 // silently missing (or wrongly interpolated) in six catalogs.
 const STREAM_STATS_PREFIXES = ['preview.stats', 'stats.state.', 'shortcuts.action.stats', 'cq.']
 
+const ILLUMINANCE_KEYS = [
+  'overlay.illuminance',
+  'overlay.illuminanceUnavailable',
+  'overlay.illuminanceWaiting',
+  'overlay.illuminanceValue',
+  'automation.trigger.illuminance',
+  'automation.triggerDesc.illuminance',
+  'automation.summary.triggerLuxBelow',
+  'automation.summary.triggerLuxAbove',
+  'automation.param.luxThreshold',
+  'automation.condition.illuminance',
+  'automation.conditionDesc.illuminance',
+  'automation.param.luxMin',
+  'automation.param.luxMax',
+  'automation.summary.conditionLuxBetween',
+  'automation.summary.conditionLuxMin',
+  'automation.summary.conditionLuxMax',
+  'automation.summary.conditionLuxAny',
+  'automation.illuminanceNow',
+]
+
 function isStreamStatsKey(key: string): boolean {
   return STREAM_STATS_PREFIXES.some((prefix) => key.startsWith(prefix))
 }
@@ -100,6 +121,19 @@ describe('catalog integrity', () => {
     for (const [name, catalog] of Object.entries(CATALOGS)) {
       for (const key of inspectorKeys) {
         expect(key in catalog, `${name} is missing inspector key '${key}'`).toBe(true)
+        expect(
+          placeholders(catalog[key] ?? ''),
+          `${name}['${key}'] placeholders differ from en`,
+        ).toBe(placeholders(en[key]))
+      }
+    }
+  })
+
+  it('illuminance keys exist in every locale with en-identical placeholders', () => {
+    for (const key of ILLUMINANCE_KEYS) expect(key in en, `en missing '${key}'`).toBe(true)
+    for (const [name, catalog] of Object.entries(CATALOGS)) {
+      for (const key of ILLUMINANCE_KEYS) {
+        expect(key in catalog, `${name} is missing illuminance key '${key}'`).toBe(true)
         expect(
           placeholders(catalog[key] ?? ''),
           `${name}['${key}'] placeholders differ from en`,

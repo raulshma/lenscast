@@ -134,7 +134,8 @@ class WhepServer internal constructor(
         stunServer: () -> String?,
         audioAllowed: () -> Boolean,
         maxSessions: Int = StreamDefaults.WHEP_MAX_VIEWERS,
-    ) : this(context, stunServer, audioAllowed, maxSessions, EncodedOverlayCompositor())
+        illuminance: () -> Int? = { null },
+    ) : this(context, stunServer, audioAllowed, maxSessions, EncodedOverlayCompositor(illuminanceProvider = illuminance))
 
     sealed class Handshake {
         /** The offer was answered: the session resource id and the answer SDP. */

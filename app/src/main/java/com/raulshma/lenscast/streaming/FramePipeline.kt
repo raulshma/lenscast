@@ -38,6 +38,7 @@ class YuvFrame(
  */
 class FramePipeline(
     private val qualityPolicy: StreamQualityPolicy,
+    private val illuminance: () -> Int? = { null },
 ) {
 
     /** Called on the pipeline worker with the JPEG for each processed frame. */
@@ -68,7 +69,7 @@ class FramePipeline(
     @Volatile
     private var jpegQuality = StreamDefaults.JPEG_QUALITY
 
-    private val overlayCompositor = EncodedOverlayCompositor()
+    private val overlayCompositor = EncodedOverlayCompositor(illuminanceProvider = illuminance)
 
     private val pacer = FramePacer(
         intervalNs = {

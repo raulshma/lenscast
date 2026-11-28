@@ -57,6 +57,9 @@ class StreamingServerEmbeddedTest {
         every { webApi.capture } returns mockk()
         every { webApi.detectionEvents } returns mockk()
         every { webApi.auditLog } returns auditLog
+        // The dashboard-demand gate (light-sensor sampling follows live
+        // dashboards) — StreamingServer forwards the SSE client-count pulses.
+        every { webApi.onDashboardClientsChanged } returns {}
         server = StreamingServer(
             port = 0,
             context = context,

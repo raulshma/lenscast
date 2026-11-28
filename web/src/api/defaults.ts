@@ -243,6 +243,7 @@ export const API_DEFAULTS = {
   showTimestamp: true,
   showBranding: false,
   showStatus: false,
+  showIlluminance: false,
   showCustomText: false,
 
   // CameraSettingsDto. cameraIso/cameraExposureTime/cameraColorTemperature/
@@ -271,4 +272,8 @@ export const API_DEFAULTS = {
 
   // Status fallbacks (used when /api/status has not loaded yet)
   clientCount: 0,
+  illuminanceLux: null,
+  // The pre-answer verdict is "no answer", never "no sensor" — a known false
+  // is the only absence claim (lib/illuminance.ts's one-verdict rule).
+  lightSensorAvailable: null,
 } as const

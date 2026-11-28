@@ -99,6 +99,13 @@ class AutomationViewModel(
     /** The bound camera's multi-level flash ceiling (null = no levels / unsupported). */
     val torchStrengthMaxLevel: StateFlow<Int?> = source.torchStrengthMaxLevel
 
+    /**
+     * The rule editor's live ambient-light reading ([AutomationSource.illuminance]).
+     * Collecting it is the sensor's demand, so only an editor that
+     * configures light ([RuleDraft.readsIlluminance]) does.
+     */
+    val illuminance: StateFlow<AutomationIlluminance> = source.illuminance
+
     /** False once the rule list is at the cap — the screen greys the add button out. */
     val canAddRule: StateFlow<Boolean> = source.automationRules
         .map { it.size < StreamDefaults.AUTOMATION_MAX_RULES }
@@ -565,6 +572,43 @@ class AutomationViewModel(
         fun clampTorchStrength(value: Int, deviceMaxLevel: Int?): Int =
             value.coerceIn(torchStrengthBounds(deviceMaxLevel))
 
+        /**
+         * The widest INT span that still maps one slider tick — and one snap
+         * position — per value. Past it the thumb cannot resolve single
+         * values anyway, and Material's slider draws one tick dot PER STEP
+         * on every frame (a lux or day-long duration span would be tens of
+         * thousands of draw calls per frame), so wider spans ride a
+         * continuous slider: the value still lands on whole numbers through
+         * [canonicalIntValue], and [sliderIsWide] opens the typed entry.
+         */
+        private const val SLIDER_TICK_SPAN_CAP = 100
+
+        /** The Material slider's `steps` for one numeric span — see [SLIDER_TICK_SPAN_CAP]. */
+        fun sliderSteps(min: Float, max: Float, integer: Boolean): Int {
+            if (!integer) return 0
+            val span = (max - min).toInt()
+            return if (span <= SLIDER_TICK_SPAN_CAP) (span - 1).coerceAtLeast(0) else 0
+        }
+
+        /** Whether the span is wider than a slider can resolve, so its value is typeable too. */
+        fun sliderIsWide(min: Float, max: Float): Boolean = (max - min).toInt() > SLIDER_TICK_SPAN_CAP
+
+        /**
+         * The rule editor's live lux readout for one [AutomationSource.illuminance]
+         * value: the measured reading once the sensor has published one; the
+         * no-sensor notice only on a KNOWN "no sensor" verdict; the waiting
+         * line while the reading is unknown — a sensor still establishing
+         * its first (debounced) reading, or a device that has not answered.
+         */
+        fun illuminanceReadout(reading: AutomationIlluminance): AutomationSummaryLine = when {
+            reading.lux != null ->
+                AutomationSummaryLine(R.string.automation_illuminance_now, listOf(reading.lux.toString()))
+            reading.sensorAvailable == false ->
+                AutomationSummaryLine(R.string.automation_illuminance_unavailable)
+            else ->
+                AutomationSummaryLine(R.string.automation_illuminance_waiting)
+        }
+
         // ── display helpers (JVM-tested) ──
 
         /** "HH:mm" over a 24-hour clock from a minute-of-day, clamped into 0..1439. */
@@ -660,6 +704,7 @@ class AutomationViewModel(
             AutomationTriggerCatalog.MOTION_DETECTED to R.string.automation_trigger_motion,
             AutomationTriggerCatalog.SOUND_DETECTED to R.string.automation_trigger_sound,
             AutomationTriggerCatalog.TAMPER_DETECTED to R.string.automation_trigger_tamper,
+            AutomationTriggerCatalog.ILLUMINANCE to R.string.automation_trigger_illuminance,
             AutomationTriggerCatalog.CHARGING_CHANGED to R.string.automation_trigger_charging,
             AutomationTriggerCatalog.BATTERY_LEVEL to R.string.automation_trigger_battery,
             AutomationTriggerCatalog.STREAMING_CHANGED to R.string.automation_trigger_streaming,
@@ -672,6 +717,7 @@ class AutomationViewModel(
             AutomationConditionCatalog.TIME_WINDOW to R.string.automation_condition_time_window,
             AutomationConditionCatalog.CHARGING to R.string.automation_condition_charging,
             AutomationConditionCatalog.BATTERY_LEVEL to R.string.automation_condition_battery,
+            AutomationConditionCatalog.ILLUMINANCE to R.string.automation_condition_illuminance,
             AutomationConditionCatalog.POWER_SAVE to R.string.automation_condition_power_save,
             AutomationConditionCatalog.WIFI_CONNECTED to R.string.automation_condition_wifi,
             AutomationConditionCatalog.STREAMING to R.string.automation_condition_streaming,
@@ -705,6 +751,8 @@ class AutomationViewModel(
         private val TRIGGER_PARAM_LABEL_OVERRIDES: Map<String, Int> = mapOf(
             "battery_level/level" to R.string.automation_param_battery_threshold,
             "battery_level/when_below" to R.string.automation_param_when_below,
+            "illuminance/lux" to R.string.automation_param_lux_threshold,
+            "illuminance/when_below" to R.string.automation_param_when_below,
             "charging_changed/charging" to R.string.automation_param_charging_plugged,
             "streaming_changed/streaming" to R.string.automation_param_streaming_active,
             "viewers_changed/connected" to R.string.automation_param_viewers_connected,
@@ -717,6 +765,8 @@ class AutomationViewModel(
             "charging/charging" to R.string.automation_param_charging_plugged,
             "battery_level/min_level" to R.string.automation_param_battery_min,
             "battery_level/max_level" to R.string.automation_param_battery_max,
+            "illuminance/min_lux" to R.string.automation_param_lux_min,
+            "illuminance/max_lux" to R.string.automation_param_lux_max,
             "power_save/enabled" to R.string.automation_param_power_save_on,
             "wifi_connected/connected" to R.string.automation_param_wifi_connected,
             "streaming/active" to R.string.automation_param_streaming_active,
@@ -924,6 +974,17 @@ class AutomationViewModel(
                 AutomationTriggerKind.TAMPER_DETECTED -> listOf(
                     AutomationSummaryLine(R.string.automation_summary_trigger_tamper),
                 )
+                AutomationTriggerKind.ILLUMINANCE -> {
+                    val lux = params["lux"]?.toIntOrNull()
+                        ?: StreamDefaults.LIGHT_SENSOR_TRIGGER_DEFAULT_LUX
+                    listOf(
+                        if (bool("when_below", true)) {
+                            AutomationSummaryLine(R.string.automation_summary_trigger_illuminance_below, listOf(lux.toString()))
+                        } else {
+                            AutomationSummaryLine(R.string.automation_summary_trigger_illuminance_above, listOf(lux.toString()))
+                        },
+                    )
+                }
                 AutomationTriggerKind.CHARGING_CHANGED ->
                     listOf(
                         if (bool("charging", true)) {
@@ -1016,6 +1077,22 @@ class AutomationViewModel(
                         AutomationSummaryLine(R.string.automation_summary_condition_power_save_off)
                     },
                 )
+                AutomationConditionCatalog.ILLUMINANCE -> {
+                    val min = params["min_lux"]?.toIntOrNull()
+                    val max = params["max_lux"]?.toIntOrNull()
+                    listOf(
+                        when {
+                            min != null && max != null ->
+                                AutomationSummaryLine(R.string.automation_summary_condition_illuminance_between, listOf(min.toString(), max.toString()))
+                            min != null ->
+                                AutomationSummaryLine(R.string.automation_summary_condition_illuminance_min, listOf(min.toString()))
+                            max != null ->
+                                AutomationSummaryLine(R.string.automation_summary_condition_illuminance_max, listOf(max.toString()))
+                            else ->
+                                AutomationSummaryLine(R.string.automation_summary_condition_illuminance_any)
+                        },
+                    )
+                }
                 AutomationConditionCatalog.WIFI_CONNECTED -> listOf(
                     if (params["connected"] != "false") {
                         AutomationSummaryLine(R.string.automation_summary_condition_wifi_on)

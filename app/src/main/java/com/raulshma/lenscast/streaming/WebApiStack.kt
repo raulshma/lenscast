@@ -49,4 +49,6 @@ data class WebApiStack(
     val uiLayout: WebUiLayoutWebHandler,
     /** POST /api/automation/test(+/restore) — the Automation Test's arm/restore pair. */
     val automationTest: AutomationTestWebHandler,
+    /** Live status-stream connections — the ambient-light sensor's dashboard demand gate. */
+    val onDashboardClientsChanged: (Int) -> Unit = {},
 )
